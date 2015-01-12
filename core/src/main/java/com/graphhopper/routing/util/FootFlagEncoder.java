@@ -104,6 +104,8 @@ public class FootFlagEncoder extends AbstractFlagEncoder
         allowedHighwayTags.add("tertiary_link");
         allowedHighwayTags.add("unclassified");
         allowedHighwayTags.add("road");
+        // FALK SPECIFIC
+        allowedHighwayTags.add("cyclepath");
         // disallowed in some countries
         //allowedHighwayTags.add("bridleway");
 
