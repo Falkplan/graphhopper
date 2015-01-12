@@ -128,7 +128,7 @@ public class FootFlagEncoderTest
 
         way.clearTags();
         way.setTag("highway", "cycleway");
-        assertFalse(footEncoder.acceptWay(way) > 0);
+        assertTrue(footEncoder.acceptWay(way) > 0);//FALK SPECIFC assertFalse(footEncoder.acceptWay(way) > 0);
         way.setTag("foot", "yes");
         assertTrue(footEncoder.acceptWay(way) > 0);
 
