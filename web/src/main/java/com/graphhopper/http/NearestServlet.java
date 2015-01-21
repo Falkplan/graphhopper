@@ -66,7 +66,6 @@ public class NearestServlet extends GHBaseServlet
             GHPoint place = GHPoint.parse(pointStr);
             
             LocationIndex index = hopper.getLocationIndex();
-            //  now you can fetch the closest edge via:
             QueryResult qr = index.findClosest( place.lat, place.lon, EdgeFilter.ALL_EDGES );
             GHPoint3D snappedPoint = qr.getSnappedPoint();
             
