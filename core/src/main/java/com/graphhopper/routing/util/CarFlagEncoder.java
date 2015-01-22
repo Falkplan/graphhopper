@@ -125,8 +125,9 @@ public class CarFlagEncoder extends AbstractFlagEncoder
         defaultSpeedMap.put("road", 20);
         // forestry stuff
         defaultSpeedMap.put("track", 15);
-        // forestry stuff
+        // falk specific
         defaultSpeedMap.put("fietsknpfalk", 17);
+        defaultSpeedMap.put("walkknpfalk", 4);
     }
 
     /**
