@@ -23,18 +23,18 @@ import com.google.inject.Injector;
 import com.google.inject.Module;
 import com.google.inject.servlet.GuiceFilter;
 import com.graphhopper.util.CmdArgs;
-import java.net.InetSocketAddress;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHolder;
-
 import java.util.EnumSet;
 import javax.servlet.DispatcherType;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.server.handler.ResourceHandler;
 import org.eclipse.jetty.server.nio.SelectChannelConnector;
+import org.eclipse.jetty.server.ssl.SslSelectChannelConnector;
 import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,12 +86,35 @@ public class GHServer
         SelectChannelConnector connector0 = new SelectChannelConnector();
         int httpPort = args.getInt("jetty.port", 8989);
         String host = args.get("jetty.host", "");
-        connector0.setPort(httpPort);
+        connector0.setPort(httpPort);        
         connector0.setRequestHeaderSize(16192);
         if (!host.isEmpty())
             connector0.setHost(host);
 
         server.addConnector(connector0);
+        
+        // SSL
+        if (args.getBool("jetty.useSsl", false) 
+                && args.get("jetty.keystorePath", null) != null 
+                && args.get("jetty.keystorePass", null) != null 
+                && args.get("jetty.keymanagerPass", null) != null 
+                && args.get("jetty.truststorePath", null) != null
+                && args.get("jetty.truststorePass", null) != null) {
+            SslContextFactory sslFactory = new SslContextFactory();
+            sslFactory.setKeyStorePath(args.get("jetty.keystorePath", ""));
+            sslFactory.setKeyStorePassword(args.get("jetty.keystorePass", ""));
+            sslFactory.setKeyManagerPassword(args.get("jetty.keymanagerPass", ""));
+            sslFactory.setTrustStore(args.get("jetty.truststorePath", ""));
+            sslFactory.setTrustStorePassword(args.get("jetty.truststorePass", ""));
+
+            SslSelectChannelConnector connector1 = new SslSelectChannelConnector(sslFactory);
+            connector1.setPort(443);      
+            connector1.setRequestHeaderSize(16192);
+            if (!host.isEmpty())
+                connector1.setHost(host);
+
+            server.addConnector(connector1);
+        }
 
         HandlerList handlers = new HandlerList();
         handlers.setHandlers(new Handler[]
