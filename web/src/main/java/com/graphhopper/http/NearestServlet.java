@@ -25,6 +25,7 @@ import com.graphhopper.util.DistanceCalc;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.shapes.GHPoint;
 import com.graphhopper.util.shapes.GHPoint3D;
+import java.io.IOException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import javax.inject.Inject;
