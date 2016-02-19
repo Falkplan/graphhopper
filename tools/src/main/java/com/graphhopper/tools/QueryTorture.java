@@ -24,19 +24,21 @@ import com.graphhopper.util.Downloader;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.StopWatch;
 import com.graphhopper.util.shapes.GHPoint;
+
 import java.io.*;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Set;
+import java.net.URLEncoder;
+import java.util.*;
+import java.util.Map.Entry;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.zip.GZIPInputStream;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Reads log files and queries the live service
- * <p/>
+ * <p>
  * @author Peter Karich
  */
 public class QueryTorture
@@ -45,6 +47,7 @@ public class QueryTorture
     {
         new QueryTorture().start(CmdArgs.read(args));
     }
+
     private final Logger logger = LoggerFactory.getLogger(getClass());
     private ExecutorService service;
     private BlockingQueue<Query> queryQueue;
@@ -59,6 +62,7 @@ public class QueryTorture
     private int readQueries;
     private int maxQueries;
     private int timeout;
+    private int statusUpdateCnt;
 
     public QueryTorture()
     {
@@ -71,6 +75,7 @@ public class QueryTorture
         baseUrl = read.get("baseurl", "");
         maxQueries = read.getInt("maxqueries", 1000);
         timeout = read.getInt("timeout", 3000);
+        statusUpdateCnt = maxQueries / 10;
         if (Helper.isEmpty(baseUrl))
             throw new IllegalArgumentException("baseUrl cannot be empty!?");
 
@@ -173,12 +178,17 @@ public class QueryTorture
         Query query = queryQueue.take();
         try
         {
-            String url = baseUrl + query.queryString;
-            String res = new Downloader("QueryTorture!").setTimeout(timeout).downloadAsString(url);
+            String url = baseUrl + query.createQueryString();
+            String res = new Downloader("QueryTorture!").setTimeout(timeout).downloadAsString(url, false);
             if (res.contains("errors"))
                 routingErrorCounter.incrementAndGet();
             else
                 successfullQueries.incrementAndGet();
+
+            if (successfullQueries.get() % statusUpdateCnt == 0)
+            {
+                logger.info("progress: " + (int) (successfullQueries.get() * 100 / maxQueries) + "%");
+            }
         } catch (IOException ex)
         {
             // logger.error("Error while querying " + query.queryString, ex);
@@ -196,14 +206,18 @@ public class QueryTorture
             {
                 try
                 {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(logFile), Helper.UTF_CS));
+                    InputStream is;
+                    if (logFile.endsWith(".gz"))
+                        is = new GZIPInputStream(new FileInputStream(logFile));
+                    else
+                        is = new FileInputStream(logFile);
+
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(is, Helper.UTF_CS));
                     try
                     {
-                        int logLineNo = 0;
                         String logLine;
                         while ((logLine = reader.readLine()) != null)
                         {
-                            logLineNo++;
                             Query q = Query.parse(logLine);
                             if (q == null)
                                 continue;
@@ -234,7 +248,8 @@ public class QueryTorture
                 {
                     logger.error("Stopped reading logs", ex);
                     // do not wait, just shut down
-                    service.shutdownNow();
+                    if (service != null)
+                        service.shutdownNow();
                 }
             }
         }.start();
@@ -242,9 +257,10 @@ public class QueryTorture
 
     static class Query
     {
-        String queryString;
         GHPoint start;
         GHPoint end;
+        List<String> points = new ArrayList<String>();
+        Map<String, String> params = new HashMap<String, String>();
 
         static Query parse( String logLine )
         {
@@ -259,25 +275,32 @@ public class QueryTorture
                 return null;
 
             Query q = new Query();
-            q.queryString = logLine.substring(0, index);
-
-            for (String param : q.queryString.split("\\&"))
+            String queryString = logLine.substring(0, index);
+            String[] tmpStrings = queryString.split("\\&");
+            for (String paramStr : tmpStrings)
             {
-                if (!param.startsWith("point="))
+                int equalIndex = paramStr.indexOf("=");
+                if (equalIndex <= 0)
                     continue;
 
-                param = param.replace("%2C", ",");
-                GHPoint point = GHPoint.parse(param.substring(6));
+                String key = paramStr.substring(0, equalIndex);
+                String value = paramStr.substring(equalIndex + 1);
+                if (!paramStr.startsWith("point="))
+                {
+                    q.params.put(key, value);
+                    continue;
+                }
+
+                value = value.replace("%2C", ",");
+                GHPoint point = GHPoint.parse(value);
                 if (point == null)
                     continue;
 
+                q.points.add(value);
                 if (q.start == null)
                     q.start = point;
                 else if (q.end == null)
-                {
                     q.end = point;
-                    break;
-                }
             }
             if (q.start != null && q.end != null)
                 return q;
@@ -285,31 +308,47 @@ public class QueryTorture
             return null;
         }
 
-        @Override
-        public int hashCode()
+        public void put( String key, String value )
         {
-            int hash = 5;
-            hash = 47 * hash + (this.queryString != null ? this.queryString.hashCode() : 0);
-            return hash;
+            params.put(key, value);
         }
 
-        @Override
-        public boolean equals( Object obj )
+        public String createQueryString()
         {
-            if (obj == null)
-                return false;
-            if (getClass() != obj.getClass())
-                return false;
-            final Query other = (Query) obj;
-            if ((this.queryString == null) ? (other.queryString != null) : !this.queryString.equals(other.queryString))
-                return false;
-            return true;
+            String qStr = "";
+            for (String pointStr : points)
+            {
+                if (!qStr.isEmpty())
+                    qStr += "&";
+
+                qStr += "point=" + pointStr;
+            }
+            for (Entry<String, String> e : params.entrySet())
+            {
+                if (!qStr.isEmpty())
+                    qStr += "&";
+
+                qStr += e.getKey() + "=" + encodeURL(e.getValue());
+            }
+
+            return qStr;
+        }
+
+        static String encodeURL( String str )
+        {
+            try
+            {
+                return URLEncoder.encode(str, "UTF-8");
+            } catch (Exception _ignore)
+            {
+                return str;
+            }
         }
 
         @Override
         public String toString()
         {
-            return queryString;
+            return createQueryString();
         }
     }
 }

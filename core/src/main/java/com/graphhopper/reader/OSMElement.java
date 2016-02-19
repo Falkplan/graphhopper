@@ -28,7 +28,7 @@ import java.util.Set;
 
 /**
  * Base class for all OSM objects
- * <p/>
+ * <p>
  * @author Nop
  * @author Peter
  */
@@ -37,6 +37,7 @@ public abstract class OSMElement
     public static final int NODE = 0;
     public static final int WAY = 1;
     public static final int RELATION = 2;
+    public static final int FILEHEADER = 3;
     private final int type;
     private final long id;
     private final Map<String, Object> properties = new HashMap<String, Object>(5);
@@ -127,11 +128,11 @@ public abstract class OSMElement
     }
 
     /**
-     * Chaeck that the object has a given tag with a given value.
+     * Check that the object has a given tag with a given value.
      */
     public boolean hasTag( String key, Object value )
     {
-        return value.equals(properties.get(key));
+        return value.equals(getTag(key, ""));
     }
 
     /**
@@ -161,7 +162,7 @@ public abstract class OSMElement
      */
     public final boolean hasTag( String key, Set<String> values )
     {
-        return values.contains(properties.get(key));
+        return values.contains(getTag(key, ""));
     }
 
     /**
@@ -172,10 +173,23 @@ public abstract class OSMElement
     {
         for (String key : keyList)
         {
-            if (values.contains(properties.get(key)))
+            if (values.contains(getTag(key, "")))
                 return true;
         }
         return false;
+    }
+
+    /**
+     * Returns the first existing tag of the specified list where the order is important.
+     */
+    public String getFirstPriorityTag( List<String> restrictions )
+    {
+        for (String str : restrictions)
+        {
+            if (hasTag(str))
+                return getTag(str);
+        }
+        return "";
     }
 
     public void removeTag( String name )
@@ -196,5 +210,11 @@ public abstract class OSMElement
     public boolean isType( int type )
     {
         return this.type == type;
+    }
+
+    @Override
+    public String toString()
+    {
+        return properties.toString();
     }
 }

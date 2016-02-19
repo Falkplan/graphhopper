@@ -25,7 +25,7 @@ import java.util.PriorityQueue;
 import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.routing.util.TraversalMode;
 import com.graphhopper.routing.util.Weighting;
-import com.graphhopper.storage.EdgeEntry;
+import com.graphhopper.storage.SPTEntry;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.util.EdgeExplorer;
 import com.graphhopper.util.EdgeIterator;
@@ -33,16 +33,16 @@ import com.graphhopper.util.EdgeIterator;
 /**
  * Implements a single source shortest path algorithm
  * http://en.wikipedia.org/wiki/Dijkstra's_algorithm
- * <p/>
+ * <p>
  * @author Peter Karich
  */
 public class Dijkstra extends AbstractRoutingAlgorithm
 {
-    private TIntObjectMap<EdgeEntry> fromMap;
-    private PriorityQueue<EdgeEntry> fromHeap;
+    protected TIntObjectMap<SPTEntry> fromMap;
+    protected PriorityQueue<SPTEntry> fromHeap;
+    protected SPTEntry currEdge;
     private int visitedNodes;
     private int to = -1;
-    private EdgeEntry currEdge;
 
     public Dijkstra( Graph g, FlagEncoder encoder, Weighting weighting, TraversalMode tMode )
     {
@@ -52,8 +52,8 @@ public class Dijkstra extends AbstractRoutingAlgorithm
 
     protected void initCollections( int size )
     {
-        fromHeap = new PriorityQueue<EdgeEntry>(size);
-        fromMap = new TIntObjectHashMap<EdgeEntry>(size);
+        fromHeap = new PriorityQueue<SPTEntry>(size);
+        fromMap = new TIntObjectHashMap<SPTEntry>(size);
     }
 
     @Override
@@ -61,21 +61,22 @@ public class Dijkstra extends AbstractRoutingAlgorithm
     {
         checkAlreadyRun();
         this.to = to;
-        currEdge = createEdgeEntry(from, 0);
+        currEdge = createSPTEntry(from, 0);
         if (!traversalMode.isEdgeBased())
         {
             fromMap.put(from, currEdge);
         }
-        return runAlgo();
+        runAlgo();
+        return extractPath();
     }
 
-    private Path runAlgo()
+    protected void runAlgo()
     {
         EdgeExplorer explorer = outEdgeExplorer;
         while (true)
         {
             visitedNodes++;
-            if (finished())
+            if (isWeightLimitExceeded() || finished())
                 break;
 
             int startNode = currEdge.adjNode;
@@ -90,10 +91,10 @@ public class Dijkstra extends AbstractRoutingAlgorithm
                 if (Double.isInfinite(tmpWeight))
                     continue;
 
-                EdgeEntry nEdge = fromMap.get(traversalId);
+                SPTEntry nEdge = fromMap.get(traversalId);
                 if (nEdge == null)
                 {
-                    nEdge = new EdgeEntry(iter.getEdge(), iter.getAdjNode(), tmpWeight);
+                    nEdge = new SPTEntry(iter.getEdge(), iter.getAdjNode(), tmpWeight);
                     nEdge.parent = currEdge;
                     fromMap.put(traversalId, nEdge);
                     fromHeap.add(nEdge);
@@ -111,13 +112,12 @@ public class Dijkstra extends AbstractRoutingAlgorithm
             }
 
             if (fromHeap.isEmpty())
-                return createEmptyPath();
+                break;
 
             currEdge = fromHeap.poll();
             if (currEdge == null)
                 throw new AssertionError("Empty edge cannot happen");
         }
-        return extractPath();
     }
 
     @Override
@@ -129,20 +129,27 @@ public class Dijkstra extends AbstractRoutingAlgorithm
     @Override
     protected Path extractPath()
     {
-        if (currEdge == null || !finished())
+        if (currEdge == null || isWeightLimitExceeded() || !finished())
             return createEmptyPath();
-        return new Path(graph, flagEncoder).setWeight(currEdge.weight).setEdgeEntry(currEdge).extract();
-    }
 
-    @Override
-    public String getName()
-    {
-        return AlgorithmOptions.DIJKSTRA;
+        return new Path(graph, flagEncoder).setWeight(currEdge.weight).setSPTEntry(currEdge).extract();
     }
 
     @Override
     public int getVisitedNodes()
     {
         return visitedNodes;
+    }
+
+    @Override
+    protected boolean isWeightLimitExceeded()
+    {
+        return currEdge.weight > weightLimit;
+    }
+
+    @Override
+    public String getName()
+    {
+        return AlgorithmOptions.DIJKSTRA;
     }
 }

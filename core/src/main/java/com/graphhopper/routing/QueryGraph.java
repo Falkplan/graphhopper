@@ -19,15 +19,12 @@ package com.graphhopper.routing;
 
 import com.graphhopper.routing.util.AllEdgesIterator;
 import com.graphhopper.routing.util.EdgeFilter;
-import com.graphhopper.storage.Graph;
-import com.graphhopper.storage.GraphExtension;
-import com.graphhopper.storage.NodeAccess;
+import com.graphhopper.storage.*;
 import com.graphhopper.storage.index.QueryResult;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
 import com.graphhopper.util.shapes.GHPoint;
 import com.graphhopper.util.shapes.GHPoint3D;
-
 import gnu.trove.list.array.TIntArrayList;
 import gnu.trove.map.TIntObjectMap;
 import gnu.trove.map.hash.TIntObjectHashMap;
@@ -35,16 +32,14 @@ import gnu.trove.procedure.TIntProcedure;
 import gnu.trove.procedure.TObjectProcedure;
 import gnu.trove.set.hash.TIntHashSet;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 
 /**
  * A class which is used to query the underlying graph with real GPS points. It does so by
  * introducing virtual nodes and edges. It is lightweight in order to be created every time a new
  * query comes in, which makes the behaviour thread safe.
- * <p/>
+ * <p>
+ *
  * @author Peter Karich
  */
 public class QueryGraph implements Graph
@@ -53,31 +48,50 @@ public class QueryGraph implements Graph
     private final NodeAccess mainNodeAccess;
     private final int mainNodes;
     private final int mainEdges;
+    private final QueryGraph baseGraph;
+    private final GraphExtension wrappedExtension;
     private List<QueryResult> queryResults;
     /**
      * Virtual edges are created between existing graph and new virtual tower nodes. For every
      * virtual node there are 4 edges: base-snap, snap-base, snap-adj, adj-snap.
      */
-    private List<EdgeIteratorState> virtualEdges;
-    private final static int VE_BASE = 0, VE_BASE_REV = 1, VE_ADJ = 2, VE_ADJ_REV = 3;
+    List<VirtualEdgeIteratorState> virtualEdges;
+    final static int VE_BASE = 0, VE_BASE_REV = 1, VE_ADJ = 2, VE_ADJ_REV = 3;
 
     /**
      * Store lat,lon of virtual tower nodes.
      */
     private PointList virtualNodes;
-    private final DistanceCalc distCalc = Helper.DIST_PLANE;
+    private static final AngleCalc ac = new AngleCalc();
+    private List<VirtualEdgeIteratorState> modifiedEdges = new ArrayList<VirtualEdgeIteratorState>(5);
 
     public QueryGraph( Graph graph )
     {
         mainGraph = graph;
         mainNodeAccess = graph.getNodeAccess();
         mainNodes = graph.getNodes();
-        mainEdges = graph.getAllEdges().getCount();
+        mainEdges = graph.getAllEdges().getMaxId();
+
+        if (mainGraph.getExtension() instanceof TurnCostExtension)
+            wrappedExtension = new QueryGraphTurnExt(this);
+        else
+            wrappedExtension = mainGraph.getExtension();
+
+        // create very lightweight QueryGraph which uses variables from this QueryGraph (same virtual edges)
+        baseGraph = new QueryGraph(graph.getBaseGraph(), this);
     }
 
-    public Graph getOriginalGraph()
+    /**
+     * See 'lookup' for further variables that are initialized
+     */
+    private QueryGraph( Graph graph, QueryGraph superQueryGraph )
     {
-        return mainGraph;
+        mainGraph = graph;
+        baseGraph = this;
+        wrappedExtension = superQueryGraph.wrappedExtension;
+        mainNodeAccess = graph.getNodeAccess();
+        mainNodes = superQueryGraph.mainNodes;
+        mainEdges = superQueryGraph.mainEdges;
     }
 
     /**
@@ -101,9 +115,13 @@ public class QueryGraph implements Graph
         if (isInitialized())
             throw new IllegalStateException("Call lookup only once. Otherwise you'll have problems for queries sharing the same edge.");
 
-        virtualEdges = new ArrayList<EdgeIteratorState>(resList.size() * 2);
+        // initialize all none-final variables
+        virtualEdges = new ArrayList<VirtualEdgeIteratorState>(resList.size() * 2);
         virtualNodes = new PointList(resList.size(), mainNodeAccess.is3D());
         queryResults = new ArrayList<QueryResult>(resList.size());
+        baseGraph.virtualEdges = virtualEdges;
+        baseGraph.virtualNodes = virtualNodes;
+        baseGraph.queryResults = queryResults;
 
         TIntObjectMap<List<QueryResult>> edge2res = new TIntObjectHashMap<List<QueryResult>>(resList.size());
 
@@ -112,11 +130,10 @@ public class QueryGraph implements Graph
         for (QueryResult res : resList)
         {
             // Do not create virtual node for a query result if it is directly on a tower node or not found
-            EdgeIteratorState closestEdge = res.getClosestEdge();
-
             if (res.getSnappedPosition() == QueryResult.Position.TOWER)
                 continue;
 
+            EdgeIteratorState closestEdge = res.getClosestEdge();
             if (closestEdge == null)
                 throw new IllegalStateException("Do not call QueryGraph.lookup with invalid QueryResult " + res);
 
@@ -189,8 +206,8 @@ public class QueryGraph implements Graph
 
                             double fromLat = fullPL.getLatitude(o1.getWayIndex());
                             double fromLon = fullPL.getLongitude(o1.getWayIndex());
-                            if (distCalc.calcNormalizedDist(fromLat, fromLon, p1.lat, p1.lon)
-                                    > distCalc.calcNormalizedDist(fromLat, fromLon, p2.lat, p2.lon))
+                            if (Helper.DIST_PLANE.calcNormalizedDist(fromLat, fromLon, p1.lat, p1.lon)
+                                    > Helper.DIST_PLANE.calcNormalizedDist(fromLat, fromLon, p2.lat, p2.lon))
                                 return 1;
                             return -1;
                         }
@@ -200,6 +217,8 @@ public class QueryGraph implements Graph
 
                 GHPoint3D prevPoint = fullPL.toGHPoint(0);
                 int adjNode = closestEdge.getAdjNode();
+                int origTraversalKey = GHUtility.createEdgeKey(baseNode, adjNode, closestEdge.getEdge(), false);
+                int origRevTraversalKey = GHUtility.createEdgeKey(baseNode, adjNode, closestEdge.getEdge(), true);
                 long reverseFlags = closestEdge.detach(true).getFlags();
                 int prevWayIndex = 1;
                 int prevNodeId = baseNode;
@@ -225,7 +244,8 @@ public class QueryGraph implements Graph
                     }
 
                     queryResults.add(res);
-                    createEdges(prevPoint, prevWayIndex,
+                    createEdges(origTraversalKey, origRevTraversalKey,
+                            prevPoint, prevWayIndex,
                             res.getSnappedPoint(), res.getWayIndex(),
                             fullPL, closestEdge, prevNodeId, virtNodeId, reverseFlags);
 
@@ -248,7 +268,9 @@ public class QueryGraph implements Graph
 
                 // two edges between last result and adjacent node are still missing if not all points skipped
                 if (addedEdges)
-                    createEdges(prevPoint, prevWayIndex, fullPL.toGHPoint(fullPL.getSize() - 1), fullPL.getSize() - 2,
+                    createEdges(origTraversalKey, origRevTraversalKey,
+                            prevPoint, prevWayIndex,
+                            fullPL.toGHPoint(fullPL.getSize() - 1), fullPL.getSize() - 2,
                             fullPL, closestEdge, virtNodeId - 1, adjNode, reverseFlags);
 
                 return true;
@@ -256,9 +278,63 @@ public class QueryGraph implements Graph
         });
     }
 
-    private void createEdges( GHPoint3D prevSnapped, int prevWayIndex, GHPoint3D currSnapped, int wayIndex,
-            PointList fullPL, EdgeIteratorState closestEdge,
-            int prevNodeId, int nodeId, long reverseFlags )
+    @Override
+    public Graph getBaseGraph()
+    {
+        // Note: if the mainGraph of this QueryGraph is a CHGraph then ignoring the shortcuts will produce a 
+        // huge gap of edgeIds between base and virtual edge ids. The only solution would be to move virtual edges
+        // directly after normal edge ids which is ugly as we limit virtual edges to N edges and waste memory or make everything more complex.        
+        return baseGraph;
+    }
+
+    public boolean isVirtualEdge( int edgeId )
+    {
+        return edgeId >= mainEdges;
+    }
+
+    public boolean isVirtualNode( int nodeId )
+    {
+        return nodeId >= mainNodes;
+    }
+
+    class QueryGraphTurnExt extends TurnCostExtension
+    {
+        private final TurnCostExtension mainTurnExtension;
+
+        public QueryGraphTurnExt( QueryGraph qGraph )
+        {
+            this.mainTurnExtension = (TurnCostExtension) mainGraph.getExtension();
+        }
+
+        @Override
+        public long getTurnCostFlags( int edgeFrom, int nodeVia, int edgeTo )
+        {
+            if (isVirtualNode(nodeVia))
+            {
+                return 0;
+            } else if (isVirtualEdge(edgeFrom) || isVirtualEdge(edgeTo))
+            {
+                if (isVirtualEdge(edgeFrom))
+                {
+                    edgeFrom = queryResults.get((edgeFrom - mainEdges) / 4).getClosestEdge().getEdge();
+                }
+                if (isVirtualEdge(edgeTo))
+                {
+                    edgeTo = queryResults.get((edgeTo - mainEdges) / 4).getClosestEdge().getEdge();
+                }
+                return mainTurnExtension.getTurnCostFlags(edgeFrom, nodeVia, edgeTo);
+
+            } else
+            {
+                return mainTurnExtension.getTurnCostFlags(edgeFrom, nodeVia, edgeTo);
+            }
+        }
+    }
+
+    private void createEdges( int origTraversalKey, int origRevTraversalKey,
+                              GHPoint3D prevSnapped, int prevWayIndex, GHPoint3D currSnapped, int wayIndex,
+                              PointList fullPL, EdgeIteratorState closestEdge,
+                              int prevNodeId, int nodeId, long reverseFlags )
     {
         int max = wayIndex + 1;
         // basePoints must have at least the size of 2 to make sure fetchWayGeometry(3) returns at least 2
@@ -271,17 +347,110 @@ public class QueryGraph implements Graph
         basePoints.add(currSnapped.lat, currSnapped.lon, currSnapped.ele);
 
         PointList baseReversePoints = basePoints.clone(true);
-        double baseDistance = basePoints.calcDistance(distCalc);
+        double baseDistance = basePoints.calcDistance(Helper.DIST_PLANE);
         int virtEdgeId = mainEdges + virtualEdges.size();
 
         // edges between base and snapped point
-        VirtualEdgeIState baseEdge = new VirtualEdgeIState(virtEdgeId, prevNodeId, nodeId,
-                baseDistance, closestEdge.getFlags(), closestEdge.getName(), basePoints);
-        VirtualEdgeIState baseReverseEdge = new VirtualEdgeIState(virtEdgeId, nodeId, prevNodeId,
-                baseDistance, reverseFlags, closestEdge.getName(), baseReversePoints);
+        VirtualEdgeIteratorState baseEdge = new VirtualEdgeIteratorState(origTraversalKey,
+                virtEdgeId, prevNodeId, nodeId, baseDistance, closestEdge.getFlags(), closestEdge.getName(), basePoints);
+        VirtualEdgeIteratorState baseReverseEdge = new VirtualEdgeIteratorState(origRevTraversalKey,
+                virtEdgeId, nodeId, prevNodeId, baseDistance, reverseFlags, closestEdge.getName(), baseReversePoints);
 
         virtualEdges.add(baseEdge);
         virtualEdges.add(baseReverseEdge);
+    }
+
+    /**
+     * set edges at virtual node unfavored which require at least a turn of 100° from favoredHeading
+     * <p>
+     * @param nodeId VirtualNode at which edges get unfavored
+     * @param favoredHeading north based azimuth of favored heading between 0 and 360
+     * @param incoming if true, incoming edges are unfavored, else outgoing edges
+     * @return boolean indicating if enforcement took place
+     */
+    public boolean enforceHeading( int nodeId, double favoredHeading, boolean incoming )
+    {
+        if (!isInitialized())
+            throw new IllegalStateException("QueryGraph.lookup has to be called in before heading enforcement");
+
+        if (Double.isNaN(favoredHeading))
+            return false;
+
+        if (!isVirtualNode(nodeId))
+            return false;
+
+        int virtNodeIDintern = nodeId - mainNodes;
+        favoredHeading = ac.convertAzimuth2xaxisAngle(favoredHeading);
+
+        // either penalize incoming or outgoing edges
+        List<Integer> edgePositions = incoming ? Arrays.asList(VE_BASE, VE_ADJ_REV) : Arrays.asList(VE_BASE_REV, VE_ADJ);
+        boolean enforcementOccurred = false;
+        for (int edgePos : edgePositions)
+        {
+            VirtualEdgeIteratorState edge = virtualEdges.get(virtNodeIDintern * 4 + edgePos);
+
+            PointList wayGeo = edge.fetchWayGeometry(3);
+            double edgeOrientation;
+            if (incoming)
+            {
+                int numWayPoints = wayGeo.getSize();
+                edgeOrientation = ac.calcOrientation(wayGeo.getLat(numWayPoints - 2), wayGeo.getLon(numWayPoints - 2),
+                        wayGeo.getLat(numWayPoints - 1), wayGeo.getLon(numWayPoints - 1));
+            } else
+            {
+                edgeOrientation = ac.calcOrientation(wayGeo.getLat(0), wayGeo.getLon(0),
+                        wayGeo.getLat(1), wayGeo.getLon(1));
+            }
+
+            edgeOrientation = ac.alignOrientation(favoredHeading, edgeOrientation);
+            double delta = (edgeOrientation - favoredHeading);
+
+            if (Math.abs(delta) > 1.74) // penalize if a turn of more than 100°
+            {
+                edge.setVirtualEdgePreference(true);
+                modifiedEdges.add(edge);
+                //also apply to opposite edge for reverse routing
+                VirtualEdgeIteratorState reverseEdge = virtualEdges.get(virtNodeIDintern * 4 + getPosOfReverseEdge(edgePos));
+                reverseEdge.setVirtualEdgePreference(true);
+                modifiedEdges.add(reverseEdge);
+                enforcementOccurred = true;
+            }
+
+        }
+        return enforcementOccurred;
+    }
+
+    /**
+     * set specific edge at virtual node unfavored, to enforce routing along other edges
+     * <p>
+     * @param nodeId VirtualNode at which edges get unfavored
+     * @param edgeId edge to become unfavored
+     * @param incoming if true, incoming edge is unfavored, else outgoing edge
+     * @return boolean indicating if enforcement took place
+     */
+    public boolean enforceHeadingByEdgeId( int nodeId, int edgeId, boolean incoming )
+    {
+        if (!isVirtualNode(nodeId))
+            return false;
+
+        VirtualEdgeIteratorState incomingEdge = (VirtualEdgeIteratorState) getEdgeIteratorState(edgeId, nodeId);
+        VirtualEdgeIteratorState reverseEdge = (VirtualEdgeIteratorState) getEdgeIteratorState(edgeId, incomingEdge.getBaseNode());
+        incomingEdge.setVirtualEdgePreference(true);
+        modifiedEdges.add(incomingEdge);
+        reverseEdge.setVirtualEdgePreference(true);
+        modifiedEdges.add(reverseEdge);
+        return true;
+    }
+
+    /**
+     * removes the unfavored status of all virtual edges
+     */
+    public void clearUnfavoredStatus()
+    {
+        for (VirtualEdgeIteratorState edge : modifiedEdges)
+        {
+            edge.setVirtualEdgePreference(false);
+        }
     }
 
     @Override
@@ -299,6 +468,12 @@ public class QueryGraph implements Graph
     private final NodeAccess nodeAccess = new NodeAccess()
     {
         @Override
+        public void ensureNode( int nodeId )
+        {
+            mainNodeAccess.ensureNode(nodeId);
+        }
+
+        @Override
         public boolean is3D()
         {
             return mainNodeAccess.is3D();
@@ -313,7 +488,7 @@ public class QueryGraph implements Graph
         @Override
         public double getLatitude( int nodeId )
         {
-            if (nodeId >= mainNodes)
+            if (isVirtualNode(nodeId))
                 return virtualNodes.getLatitude(nodeId - mainNodes);
             return mainNodeAccess.getLatitude(nodeId);
         }
@@ -321,7 +496,7 @@ public class QueryGraph implements Graph
         @Override
         public double getLongitude( int nodeId )
         {
-            if (nodeId >= mainNodes)
+            if (isVirtualNode(nodeId))
                 return virtualNodes.getLongitude(nodeId - mainNodes);
             return mainNodeAccess.getLongitude(nodeId);
         }
@@ -329,7 +504,7 @@ public class QueryGraph implements Graph
         @Override
         public double getElevation( int nodeId )
         {
-            if (nodeId >= mainNodes)
+            if (isVirtualNode(nodeId))
                 return virtualNodes.getElevation(nodeId - mainNodes);
             return mainNodeAccess.getElevation(nodeId);
         }
@@ -337,7 +512,7 @@ public class QueryGraph implements Graph
         @Override
         public int getAdditionalNodeField( int nodeId )
         {
-            if (nodeId >= mainNodes)
+            if (isVirtualNode(nodeId))
                 return 0;
             return mainNodeAccess.getAdditionalNodeField(nodeId);
         }
@@ -386,26 +561,33 @@ public class QueryGraph implements Graph
     }
 
     @Override
-    public EdgeIteratorState getEdgeProps( int origEdgeId, int adjNode )
+    public EdgeIteratorState getEdgeIteratorState( int origEdgeId, int adjNode )
     {
-        if (origEdgeId < mainEdges)
-            return mainGraph.getEdgeProps(origEdgeId, adjNode);
+        if (!isVirtualEdge(origEdgeId))
+            return mainGraph.getEdgeIteratorState(origEdgeId, adjNode);
 
         int edgeId = origEdgeId - mainEdges;
         EdgeIteratorState eis = virtualEdges.get(edgeId);
         if (eis.getAdjNode() == adjNode || adjNode == Integer.MIN_VALUE)
             return eis;
+        edgeId = getPosOfReverseEdge(edgeId);
 
-        // find reverse edge via convention. see virtualEdges comment above
-        if (edgeId % 2 == 0)
-            edgeId++;
-        else
-            edgeId--;
         EdgeIteratorState eis2 = virtualEdges.get(edgeId);
         if (eis2.getAdjNode() == adjNode)
             return eis2;
         throw new IllegalStateException("Edge " + origEdgeId + " not found with adjNode:" + adjNode
                 + ". found edges were:" + eis + ", " + eis2);
+    }
+
+    private int getPosOfReverseEdge( int edgeId )
+    {
+        // find reverse edge via convention. see virtualEdges comment above
+        if (edgeId % 2 == 0)
+            edgeId++;
+        else
+            edgeId--;
+
+        return edgeId;
     }
 
     @Override
@@ -444,7 +626,7 @@ public class QueryGraph implements Graph
             //
             // base node
             int towerNode = baseRevEdge.getAdjNode();
-            if (towerNode < mainNodes)
+            if (!isVirtualNode(towerNode))
             {
                 towerNodesToChange.add(towerNode);
                 addVirtualEdges(node2EdgeMap, edgeFilter, true, towerNode, i);
@@ -452,7 +634,7 @@ public class QueryGraph implements Graph
 
             // adj node
             towerNode = adjEdge.getAdjNode();
-            if (towerNode < mainNodes)
+            if (!isVirtualNode(towerNode))
             {
                 towerNodesToChange.add(towerNode);
                 addVirtualEdges(node2EdgeMap, edgeFilter, false, towerNode, i);
@@ -490,7 +672,7 @@ public class QueryGraph implements Graph
      * Creates a fake edge iterator pointing to multiple edge states.
      */
     private void addVirtualEdges( TIntObjectMap<VirtualEdgeIterator> node2EdgeMap, EdgeFilter filter, boolean base,
-            int node, int virtNode )
+                                  int node, int virtNode )
     {
         VirtualEdgeIterator existingIter = node2EdgeMap.get(node);
         if (existingIter == null)
@@ -507,8 +689,8 @@ public class QueryGraph implements Graph
 
     void fillVirtualEdges( TIntObjectMap<VirtualEdgeIterator> node2Edge, int towerNode, EdgeExplorer mainExpl )
     {
-        if (towerNode >= mainNodes)
-            throw new IllegalStateException("should not happen:" + towerNode + ", " + node2Edge);
+        if (isVirtualNode(towerNode))
+            throw new IllegalStateException("Node should not be virtual:" + towerNode + ", " + node2Edge);
 
         VirtualEdgeIterator vIter = node2Edge.get(towerNode);
         TIntArrayList ignoreEdges = new TIntArrayList(vIter.count() * 2);
@@ -569,363 +751,11 @@ public class QueryGraph implements Graph
     @Override
     public GraphExtension getExtension()
     {
-        return mainGraph.getExtension();
+        return wrappedExtension;
     }
 
     private UnsupportedOperationException exc()
     {
         return new UnsupportedOperationException("QueryGraph cannot be modified.");
-    }
-
-    static class VirtualEdgeIterator implements EdgeIterator, EdgeSkipIterState
-    {
-
-        private final List<EdgeIteratorState> edges;
-        private int current;
-
-        public VirtualEdgeIterator( int edgeCount )
-        {
-            edges = new ArrayList<EdgeIteratorState>(edgeCount);
-            reset();
-        }
-
-        void add( EdgeIteratorState edge )
-        {
-            edges.add(edge);
-        }
-
-        EdgeIterator reset()
-        {
-            current = -1;
-            return this;
-        }
-
-        int count()
-        {
-            return edges.size();
-        }
-
-        @Override
-        public boolean next()
-        {
-            current++;
-            return current < edges.size();
-        }
-
-        @Override
-        public EdgeIteratorState detach( boolean reverse )
-        {
-            if (reverse)
-                throw new IllegalStateException("Not yet supported");
-
-            return edges.get(current);
-        }
-
-        @Override
-        public int getEdge()
-        {
-            return edges.get(current).getEdge();
-        }
-
-        @Override
-        public int getBaseNode()
-        {
-            return edges.get(current).getBaseNode();
-        }
-
-        @Override
-        public int getAdjNode()
-        {
-            return edges.get(current).getAdjNode();
-        }
-
-        @Override
-        public PointList fetchWayGeometry( int mode )
-        {
-            return edges.get(current).fetchWayGeometry(mode);
-        }
-
-        @Override
-        public EdgeIteratorState setWayGeometry( PointList list )
-        {
-            return edges.get(current).setWayGeometry(list);
-        }
-
-        @Override
-        public double getDistance()
-        {
-            return edges.get(current).getDistance();
-        }
-
-        @Override
-        public EdgeIteratorState setDistance( double dist )
-        {
-            return edges.get(current).setDistance(dist);
-        }
-
-        @Override
-        public long getFlags()
-        {
-            return edges.get(current).getFlags();
-        }
-
-        @Override
-        public EdgeIteratorState setFlags( long flags )
-        {
-            return edges.get(current).setFlags(flags);
-        }
-
-        @Override
-        public String getName()
-        {
-            return edges.get(current).getName();
-        }
-
-        @Override
-        public EdgeIteratorState setName( String name )
-        {
-            return edges.get(current).setName(name);
-        }
-
-        @Override
-        public String toString()
-        {
-            return edges.toString();
-        }
-
-        @Override
-        public int getAdditionalField()
-        {
-            return edges.get(current).getAdditionalField();
-        }
-
-        @Override
-        public EdgeIteratorState setAdditionalField( int value )
-        {
-            return edges.get(current).setAdditionalField(value);
-        }
-
-        @Override
-        public EdgeIteratorState copyPropertiesTo( EdgeIteratorState edge )
-        {
-            return edges.get(current).copyPropertiesTo(edge);
-        }
-
-        @Override
-        public boolean isShortcut()
-        {
-            EdgeIteratorState edge = edges.get(current);
-            return edge instanceof EdgeSkipIterState && ((EdgeSkipIterState) edge).isShortcut();
-        }
-
-        @Override
-        public double getWeight()
-        {
-            // will be called only from PreparationWeighting and if isShortcut is true
-            return ((EdgeSkipIterState) edges.get(current)).getWeight();
-        }
-
-        @Override
-        public EdgeSkipIterState setWeight( double weight )
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public int getSkippedEdge1()
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public int getSkippedEdge2()
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public void setSkippedEdges( int edge1, int edge2 )
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-    }
-
-    /**
-     * Creates an edge state decoupled from a graph where nodes, pointList, etc are kept in memory.
-     */
-    private static class VirtualEdgeIState implements EdgeIteratorState, EdgeSkipIterState
-    {
-
-        private final PointList pointList;
-        private final int edgeId;
-        private double distance;
-        private long flags;
-        private String name;
-        private final int baseNode;
-        private final int adjNode;
-
-        public VirtualEdgeIState( int edgeId, int baseNode, int adjNode,
-                double distance, long flags, String name, PointList pointList )
-        {
-            this.edgeId = edgeId;
-            this.baseNode = baseNode;
-            this.adjNode = adjNode;
-            this.distance = distance;
-            this.flags = flags;
-            this.name = name;
-            this.pointList = pointList;
-        }
-
-        @Override
-        public int getEdge()
-        {
-            return edgeId;
-        }
-
-        @Override
-        public int getBaseNode()
-        {
-            return baseNode;
-        }
-
-        @Override
-        public int getAdjNode()
-        {
-            return adjNode;
-        }
-
-        @Override
-        public PointList fetchWayGeometry( int mode )
-        {
-            if (pointList.getSize() == 0)
-                return PointList.EMPTY;
-
-            // due to API we need to create a new instance per call!
-            if (mode == 3)
-                return pointList.clone(false);
-            else if (mode == 1)
-                return pointList.copy(0, pointList.getSize() - 1);
-            else if (mode == 2)
-                return pointList.copy(1, pointList.getSize());
-            else if (mode == 0)
-            {
-                if (pointList.getSize() == 1)
-                    return PointList.EMPTY;
-                return pointList.copy(1, pointList.getSize() - 1);
-            }
-
-            throw new UnsupportedOperationException("Illegal mode:" + mode);
-        }
-
-        @Override
-        public EdgeIteratorState setWayGeometry( PointList list )
-        {
-            throw new UnsupportedOperationException("Not supported for virtual edge. Set when creating it.");
-        }
-
-        @Override
-        public double getDistance()
-        {
-            return distance;
-        }
-
-        @Override
-        public EdgeIteratorState setDistance( double dist )
-        {
-            this.distance = dist;
-            return this;
-        }
-
-        @Override
-        public long getFlags()
-        {
-            return flags;
-        }
-
-        @Override
-        public EdgeIteratorState setFlags( long flags )
-        {
-            this.flags = flags;
-            return this;
-        }
-
-        @Override
-        public String getName()
-        {
-            return name;
-        }
-
-        @Override
-        public EdgeIteratorState setName( String name )
-        {
-            this.name = name;
-            return this;
-        }
-
-        @Override
-        public String toString()
-        {
-            return baseNode + "->" + adjNode;
-        }
-
-        @Override
-        public boolean isShortcut()
-        {
-            return false;
-        }
-
-        @Override
-        public int getAdditionalField()
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public int getSkippedEdge1()
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public int getSkippedEdge2()
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public void setSkippedEdges( int edge1, int edge2 )
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public EdgeIteratorState detach( boolean reverse )
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public EdgeIteratorState setAdditionalField( int value )
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public EdgeIteratorState copyPropertiesTo( EdgeIteratorState edge )
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public EdgeSkipIterState setWeight( double weight )
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
-
-        @Override
-        public double getWeight()
-        {
-            throw new UnsupportedOperationException("Not supported.");
-        }
     }
 }

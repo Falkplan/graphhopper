@@ -19,15 +19,18 @@
 package com.graphhopper.reader.dem;
 
 import com.graphhopper.storage.DAType;
+
 import java.io.File;
 import java.io.IOException;
+
 import org.junit.After;
 import org.junit.Test;
+
 import static org.junit.Assert.*;
+
 import org.junit.Before;
 
 /**
- *
  * @author Peter Karich
  */
 public class SRTMProviderTest
@@ -88,6 +91,15 @@ public class SRTMProviderTest
         // precision = 1e7 => -4
         // assertEquals(161, instance.getEle(55.8943144, -3.0004), 1e-1);
         // assertEquals(161, instance.getEle(55.8943144, -3.0000001), 1e-1);
+    }
+
+    @Test
+    public void testGetHeight_issue545() throws IOException
+    {
+        instance.setCacheDir(new File("./files/"));
+
+        // test different precision of the elevation file (3600)
+        assertEquals(84, instance.getEle(48.003878, -124.660492), 1e-1);
     }
 
     @Test

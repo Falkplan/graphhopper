@@ -20,11 +20,11 @@ package com.graphhopper.storage.index;
 import com.graphhopper.coll.GHBitSet;
 import com.graphhopper.coll.GHTBitSet;
 import com.graphhopper.geohash.SpatialKeyAlgo;
-import com.graphhopper.routing.util.AllEdgesIterator;
 import com.graphhopper.routing.util.EdgeFilter;
 import com.graphhopper.storage.DataAccess;
 import com.graphhopper.storage.Directory;
 import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.CHGraph;
 import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
@@ -33,17 +33,19 @@ import gnu.trove.iterator.TIntIterator;
 import gnu.trove.list.array.TIntArrayList;
 import gnu.trove.procedure.TIntProcedure;
 import gnu.trove.set.hash.TIntHashSet;
+
 import java.util.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * This implementation implements an n-tree to get the closest node or edge from GPS coordinates.
- * <p/>
+ * <p>
  * All leafs are at the same depth, otherwise it is quite complicated to calculate the bresenham
  * line for different resolutions, especially if a leaf node could be split into a tree-node and
  * resolution changes.
- * <p/>
+ * <p>
  * @author Peter Karich
  */
 public class LocationIndexTree implements LocationIndex
@@ -74,12 +76,18 @@ public class LocationIndexTree implements LocationIndex
      */
     private double equalNormedDelta;
 
+    /**
+     * @param g the graph for which this index should do the lookup based on latitude,longitude.
+     */
     public LocationIndexTree( Graph g, Directory dir )
     {
+        if (g instanceof CHGraph)
+            throw new IllegalArgumentException("Use base graph for LocationIndexTree instead of CHGraph");
+
         MAGIC_INT = Integer.MAX_VALUE / 22316;
         this.graph = g;
         this.nodeAccess = g.getNodeAccess();
-        dataAccess = dir.find("locationIndex");
+        dataAccess = dir.find("location_index");
     }
 
     public int getMinResolutionInMeter()
@@ -124,8 +132,11 @@ public class LocationIndexTree implements LocationIndex
         // if we assume a minimum resolution like 0.5km for a leaf-tile                
         // n^(depth/2) = toMeter(dLon) / minResolution
         BBox bounds = graph.getBounds();
-        if (graph.getNodes() == 0 || !bounds.check())
-            throw new IllegalStateException("Bounds of graph are invalid: " + bounds);
+        if (graph.getNodes() == 0)
+            throw new IllegalStateException("Cannot create location index of empty graph!");
+
+        if (!bounds.isValid())
+            throw new IllegalStateException("Cannot create location index when graph has invalid bounds: " + bounds);
 
         double lat = Math.min(Math.abs(bounds.maxLat), Math.abs(bounds.minLat));
         double maxDistInMeter = Math.max(
@@ -236,27 +247,6 @@ public class LocationIndexTree implements LocationIndex
     }
 
     @Override
-    public boolean loadExisting()
-    {
-        if (initialized)
-            throw new IllegalStateException("Call loadExisting only once");
-
-        if (!dataAccess.loadExisting())
-            return false;
-
-        if (dataAccess.getHeader(0) != MAGIC_INT)
-            throw new IllegalStateException("incorrect location2id index version, expected:" + MAGIC_INT);
-
-        if (dataAccess.getHeader(1 * 4) != calcChecksum())
-            throw new IllegalStateException("location2id index was opened with incorrect graph");
-
-        setMinResolutionInMeter(dataAccess.getHeader(2 * 4));
-        prepareAlgo();
-        initialized = true;
-        return true;
-    }
-
-    @Override
     public LocationIndex setResolution( int minResolutionInMeter )
     {
         if (minResolutionInMeter <= 0)
@@ -280,6 +270,28 @@ public class LocationIndexTree implements LocationIndex
     public LocationIndexTree create( long size )
     {
         throw new UnsupportedOperationException("Not supported. Use prepareIndex instead.");
+    }
+
+    @Override
+    public boolean loadExisting()
+    {
+        if (initialized)
+            throw new IllegalStateException("Call loadExisting only once");
+
+        if (!dataAccess.loadExisting())
+            return false;
+
+        if (dataAccess.getHeader(0) != MAGIC_INT)
+            throw new IllegalStateException("incorrect location index version, expected:" + MAGIC_INT);
+
+        if (dataAccess.getHeader(1 * 4) != calcChecksum())
+            throw new IllegalStateException("location index was opened with incorrect graph: "
+                    + dataAccess.getHeader(1 * 4) + " vs. " + calcChecksum());
+
+        setMinResolutionInMeter(dataAccess.getHeader(2 * 4));
+        prepareAlgo();
+        initialized = true;
+        return true;
     }
 
     @Override
@@ -321,6 +333,7 @@ public class LocationIndexTree implements LocationIndex
                 + ", leafs:" + Helper.nf(inMem.leafs)
                 + ", precision:" + minResolutionInMeter
                 + ", depth:" + entries.length
+                + ", checksum:" + calcChecksum()
                 + ", entries:" + Arrays.toString(entries)
                 + ", entriesPerLeaf:" + entriesPerLeaf);
 
@@ -329,7 +342,7 @@ public class LocationIndexTree implements LocationIndex
 
     int calcChecksum()
     {
-        // do not include the edges as we could get problem with LevelGraph due to shortcuts
+        // do not include the edges as we could get problem with CHGraph due to shortcuts
         // ^ graph.getAllEdges().count();
         return graph.getNodes();
     }
@@ -371,7 +384,7 @@ public class LocationIndexTree implements LocationIndex
 
         void prepare()
         {
-            final EdgeIterator allIter = getAllEdges();
+            final EdgeIterator allIter = graph.getAllEdges();
             try
             {
                 while (allIter.next())
@@ -404,8 +417,8 @@ public class LocationIndexTree implements LocationIndex
         }
 
         void addNode( final int nodeA, final int nodeB,
-                final double lat1, final double lon1,
-                final double lat2, final double lon2 )
+                      final double lat1, final double lon1,
+                      final double lat2, final double lon2 )
         {
             PointEmitter pointEmitter = new PointEmitter()
             {
@@ -415,7 +428,7 @@ public class LocationIndexTree implements LocationIndex
                     long key = keyAlgo.encode(lat, lon);
                     long keyPart = createReverseKey(key);
                     // no need to feed both nodes as we search neighbors in fillIDs
-                    addNode(root, pickBestNode(nodeA, nodeB), 0, keyPart, key);
+                    addNode(root, nodeA, 0, keyPart, key);
                 }
             };
             BresenhamLine.calcPoints(lat1, lon1, lat2, lon2, pointEmitter,
@@ -694,56 +707,54 @@ public class LocationIndexTree implements LocationIndex
      * This method collects the node indices from the quad tree data structure in a certain order
      * which makes sure not too many nodes are collected as well as no nodes will be missing. See
      * discussion at issue #221.
+     * <p>
+     * @return true if no further call of this method is required. False otherwise, ie. a next
+     * iteration is necessary and no early finish possible.
      */
-    public final TIntHashSet findNetworkEntries( double queryLat, double queryLon, int maxIteration )
+    public final boolean findNetworkEntries( double queryLat, double queryLon,
+                                             TIntHashSet foundEntries, int iteration )
     {
-        TIntHashSet foundEntries = new TIntHashSet();
-
-        for (int iteration = 0; iteration < maxIteration; iteration++)
+        // find entries in border of searchbox
+        for (int yreg = -iteration; yreg <= iteration; yreg++)
         {
-            // find entries in border of searchbox
-            for (int yreg = -iteration; yreg <= iteration; yreg++)
+            double subqueryLat = queryLat + yreg * deltaLat;
+            double subqueryLonA = queryLon - iteration * deltaLon;
+            double subqueryLonB = queryLon + iteration * deltaLon;
+            findNetworkEntriesSingleRegion(foundEntries, subqueryLat, subqueryLonA);
+
+            // minor optimization for iteration == 0
+            if (iteration > 0)
+                findNetworkEntriesSingleRegion(foundEntries, subqueryLat, subqueryLonB);
+        }
+
+        for (int xreg = -iteration + 1; xreg <= iteration - 1; xreg++)
+        {
+            double subqueryLon = queryLon + xreg * deltaLon;
+            double subqueryLatA = queryLat - iteration * deltaLat;
+            double subqueryLatB = queryLat + iteration * deltaLat;
+            findNetworkEntriesSingleRegion(foundEntries, subqueryLatA, subqueryLon);
+            findNetworkEntriesSingleRegion(foundEntries, subqueryLatB, subqueryLon);
+        }
+
+        if (iteration % 2 == 1)
+        {
+            // Check if something was found already...
+            if (!foundEntries.isEmpty())
             {
-                double subqueryLat = queryLat + yreg * deltaLat;
-                double subqueryLonA = queryLon - iteration * deltaLon;
-                double subqueryLonB = queryLon + iteration * deltaLon;
-                findNetworkEntriesSingleRegion(foundEntries, subqueryLat, subqueryLonA);
+                double rMin = calculateRMin(queryLat, queryLon, iteration);
+                double minDistance = calcMinDistance(queryLat, queryLon, foundEntries);
 
-                // minor optimization for iteration == 0
-                if (iteration > 0)
-                {
-                    findNetworkEntriesSingleRegion(foundEntries, subqueryLat, subqueryLonB);
-                }
-            }
-
-            for (int xreg = -iteration + 1; xreg <= iteration - 1; xreg++)
-            {
-                double subqueryLon = queryLon + xreg * deltaLon;
-                double subqueryLatA = queryLat - iteration * deltaLat;
-                double subqueryLatB = queryLat + iteration * deltaLat;
-                findNetworkEntriesSingleRegion(foundEntries, subqueryLatA, subqueryLon);
-                findNetworkEntriesSingleRegion(foundEntries, subqueryLatB, subqueryLon);
-            }
-
-            // see #232
-            if (iteration % 2 == 1)
-            {
-                // Check if something was found already...
-                if (foundEntries.size() > 0)
-                {
-                    double rMin = calculateRMin(queryLat, queryLon, iteration);
-                    double minDistance = calcMinDistance(queryLat, queryLon, foundEntries);
-
-                    if (minDistance < rMin)
-                    {   // resultEntries contains a nearest node for sure
-                        break;
-                    } // else: continue an undetected nearer node may sit in a neighbouring tile.
-                    // Now calculate how far we have to look outside to find any hidden nearest nodes
-                    // and repeat whole process with wider search area until this distance is covered.
-                }
+                if (minDistance < rMin)
+                    // early finish => foundEntries contains a nearest node for sure
+                    return true;
+                // else: continue as an undetected nearer node may sit in a neighbouring tile.
+                // Now calculate how far we have to look outside to find any hidden nearest nodes
+                // and repeat whole process with wider search area until this distance is covered.
             }
         }
-        return foundEntries;
+
+        // no early finish possible
+        return false;
     }
 
     final double calcMinDistance( double queryLat, double queryLon, TIntHashSet pointset )
@@ -776,50 +787,59 @@ public class LocationIndexTree implements LocationIndex
         if (isClosed())
             throw new IllegalStateException("You need to create a new LocationIndex instance as it is already closed");
 
-        final TIntHashSet storedNetworkEntryIds = findNetworkEntries(queryLat, queryLon, maxRegionSearch);
+        TIntHashSet allCollectedEntryIds = new TIntHashSet();
         final QueryResult closestMatch = new QueryResult(queryLat, queryLon);
-        if (storedNetworkEntryIds.isEmpty())
-            return closestMatch;
-
-        // clone storedIds to avoid interference with forEach
-        final GHBitSet checkBitset = new GHTBitSet(new TIntHashSet(storedNetworkEntryIds));
-        // find nodes from the network entries which are close to 'point'
-        final EdgeExplorer explorer = graph.createEdgeExplorer(getEdgeFilter());
-        storedNetworkEntryIds.forEach(new TIntProcedure()
+        for (int iteration = 0; iteration < maxRegionSearch; iteration++)
         {
-            @Override
-            public boolean execute( int networkEntryNodeId )
+            TIntHashSet storedNetworkEntryIds = new TIntHashSet();
+            boolean earlyFinish = findNetworkEntries(queryLat, queryLon, storedNetworkEntryIds, iteration);
+            storedNetworkEntryIds.removeAll(allCollectedEntryIds);
+            allCollectedEntryIds.addAll(storedNetworkEntryIds);
+
+            // clone storedIds to avoid interference with forEach
+            final GHBitSet checkBitset = new GHTBitSet(new TIntHashSet(storedNetworkEntryIds));
+            // find nodes from the network entries which are close to 'point'
+            final EdgeExplorer explorer = graph.createEdgeExplorer();
+            storedNetworkEntryIds.forEach(new TIntProcedure()
             {
-                new XFirstSearchCheck(queryLat, queryLon, checkBitset, edgeFilter)
+                @Override
+                public boolean execute( int networkEntryNodeId )
                 {
-                    @Override
-                    protected double getQueryDistance()
+                    new XFirstSearchCheck(queryLat, queryLon, checkBitset, edgeFilter)
                     {
-                        return closestMatch.getQueryDistance();
-                    }
-
-                    @Override
-                    protected boolean check( int node, double normedDist, int wayIndex, EdgeIteratorState edge, QueryResult.Position pos )
-                    {
-                        if (normedDist < closestMatch.getQueryDistance())
+                        @Override
+                        protected double getQueryDistance()
                         {
-                            closestMatch.setQueryDistance(normedDist);
-                            closestMatch.setClosestNode(node);
-                            closestMatch.setClosestEdge(edge.detach(false));
-                            closestMatch.setWayIndex(wayIndex);
-                            closestMatch.setSnappedPosition(pos);
-                            return true;
+                            return closestMatch.getQueryDistance();
                         }
-                        return false;
-                    }
-                }.start(explorer, networkEntryNodeId);
-                return true;
-            }
-        });
 
+                        @Override
+                        protected boolean check( int node, double normedDist, int wayIndex, EdgeIteratorState edge, QueryResult.Position pos )
+                        {
+                            if (normedDist < closestMatch.getQueryDistance())
+                            {
+                                closestMatch.setQueryDistance(normedDist);
+                                closestMatch.setClosestNode(node);
+                                closestMatch.setClosestEdge(edge.detach(false));
+                                closestMatch.setWayIndex(wayIndex);
+                                closestMatch.setSnappedPosition(pos);
+                                return true;
+                            }
+                            return false;
+                        }
+                    }.start(explorer, networkEntryNodeId);
+                    return true;
+                }
+            });
+
+            // do early finish only if something was found (#318)
+            if (earlyFinish && closestMatch.isValid())
+                break;
+        }
+
+        // denormalize distance and calculate snapping point only if closed match was found
         if (closestMatch.isValid())
         {
-            // denormalize distance            
             closestMatch.setQueryDistance(distCalc.calcDenormalizedDist(closestMatch.getQueryDistance()));
             closestMatch.calcSnappedPoint(distCalc);
         }
@@ -933,23 +953,6 @@ public class LocationIndexTree implements LocationIndex
         protected abstract double getQueryDistance();
 
         protected abstract boolean check( int node, double normedDist, int wayIndex, EdgeIteratorState iter, QueryResult.Position pos );
-    }
-
-    protected int pickBestNode( int nodeA, int nodeB )
-    {
-        // For normal graph the node does not matter because if nodeA is conntected to nodeB
-        // then nodeB is also connect to nodeA, but for a LevelGraph this does not apply.
-        return nodeA;
-    }
-
-    protected EdgeFilter getEdgeFilter()
-    {
-        return EdgeFilter.ALL_EDGES;
-    }
-
-    protected AllEdgesIterator getAllEdges()
-    {
-        return graph.getAllEdges();
     }
 
     // make entries static as otherwise we get an additional reference to this class (memory waste)

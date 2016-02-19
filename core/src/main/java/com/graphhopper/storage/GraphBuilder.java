@@ -18,10 +18,12 @@
 package com.graphhopper.storage;
 
 import com.graphhopper.routing.util.EncodingManager;
+import com.graphhopper.routing.util.Weighting;
+import java.util.Arrays;
 
 /**
  * For now this is just a helper class to quickly create a GraphStorage.
- * <p/>
+ * <p>
  * @author Peter Karich
  */
 public class GraphBuilder
@@ -30,9 +32,9 @@ public class GraphBuilder
     private String location;
     private boolean mmap;
     private boolean store;
-    private boolean level;
     private boolean elevation;
     private long byteCapacity = 100;
+    private Weighting singleCHWeighting;
 
     public GraphBuilder( EncodingManager encodingManager )
     {
@@ -40,13 +42,11 @@ public class GraphBuilder
     }
 
     /**
-     * If true builder will create a LevelGraph
-     * <p/>
-     * @see LevelGraph
+     * This method enables creating a CHGraph with the specified weighting.
      */
-    public GraphBuilder setLevelGraph( boolean level )
+    public GraphBuilder setCHGraph( Weighting singleCHWeighting )
     {
-        this.level = level;
+        this.singleCHWeighting = singleCHWeighting;
         return this;
     }
 
@@ -85,25 +85,20 @@ public class GraphBuilder
         return elevation;
     }
 
-    public LevelGraphStorage levelGraphBuild()
-    {
-        return (LevelGraphStorage) setLevelGraph(true).build();
-    }
-
     /**
-     * Creates a LevelGraphStorage
+     * Creates a CHGraph
      */
-    public LevelGraphStorage levelGraphCreate()
+    public CHGraph chGraphCreate( Weighting singleCHWeighting )
     {
-        return (LevelGraphStorage) setLevelGraph(true).create();
+        return setCHGraph(singleCHWeighting).create().getGraph(CHGraph.class, singleCHWeighting);
     }
 
     /**
      * Default graph is a GraphStorage with an in memory directory and disabled storing on flush.
-     * Afterwards you'll need to call GraphStorage.create to have a useable object. Better use
+     * Afterwards you'll need to call GraphStorage. Create to have a usable object. Better use
      * create.
      */
-    public GraphStorage build()
+    public GraphHopperStorage build()
     {
         Directory dir;
         if (mmap)
@@ -111,16 +106,11 @@ public class GraphBuilder
         else
             dir = new RAMDirectory(location, store);
 
-        GraphStorage graph;
-        if (level)
-            graph = new LevelGraphStorage(dir, encodingManager, elevation);
+        GraphHopperStorage graph;
+        if (encodingManager.needsTurnCostsSupport() || singleCHWeighting == null)
+            graph = new GraphHopperStorage(dir, encodingManager, elevation, new TurnCostExtension());
         else
-        {
-            if (encodingManager.needsTurnCostsSupport())
-                graph = new GraphHopperStorage(dir, encodingManager, elevation, new TurnCostExtension());
-            else
-                graph = new GraphHopperStorage(dir, encodingManager, elevation);
-        }
+            graph = new GraphHopperStorage(Arrays.asList(singleCHWeighting), dir, encodingManager, elevation, new TurnCostExtension.NoOpExtension());
 
         return graph;
     }
@@ -128,7 +118,7 @@ public class GraphBuilder
     /**
      * Default graph is a GraphStorage with an in memory directory and disabled storing on flush.
      */
-    public GraphStorage create()
+    public GraphHopperStorage create()
     {
         return build().create(byteCapacity);
     }
@@ -136,9 +126,9 @@ public class GraphBuilder
     /**
      * @throws IllegalStateException if not loadable.
      */
-    public GraphStorage load()
+    public GraphHopperStorage load()
     {
-        GraphStorage gs = build();
+        GraphHopperStorage gs = build();
         if (!gs.loadExisting())
         {
             throw new IllegalStateException("Cannot load graph " + location);

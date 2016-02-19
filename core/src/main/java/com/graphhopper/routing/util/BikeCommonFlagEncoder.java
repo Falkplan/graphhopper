@@ -17,18 +17,20 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.reader.OSMWay;
 import com.graphhopper.reader.OSMRelation;
-import static com.graphhopper.routing.util.PriorityCode.*;
+import com.graphhopper.reader.OSMWay;
+import com.graphhopper.reader.osm.conditional.ConditionalTagsInspector;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.InstructionAnnotation;
 import com.graphhopper.util.Translation;
 
 import java.util.*;
 
+import static com.graphhopper.routing.util.PriorityCode.*;
+
 /**
  * Defines bit layout of bicycles (not motorcycles) for speed, access and relations (network).
- * <p/>
+ * <p>
  * @author Peter Karich
  * @author Nop
  * @author ratrun
@@ -36,7 +38,7 @@ import java.util.*;
 public class BikeCommonFlagEncoder extends AbstractFlagEncoder
 {
     /**
-     * Reports wether this edge is unpaved.
+     * Reports whether this edge is unpaved.
      */
     public static final int K_UNPAVED = 100;
     protected static final int PUSHING_SECTION_SPEED = 4;
@@ -47,15 +49,21 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
     protected final Set<String> preferHighwayTags = new HashSet<String>();
     protected final Set<String> avoidHighwayTags = new HashSet<String>();
     protected final Set<String> unpavedSurfaceTags = new HashSet<String>();
-    private final Map<String, Integer> trackTypeSpeed = new HashMap<String, Integer>();
-    private final Map<String, Integer> surfaceSpeed = new HashMap<String, Integer>();
+    private final Map<String, Integer> trackTypeSpeeds = new HashMap<String, Integer>();
+    private final Map<String, Integer> surfaceSpeeds = new HashMap<String, Integer>();
     private final Set<String> roadValues = new HashSet<String>();
-    private final Map<String, Integer> highwaySpeed = new HashMap<String, Integer>();
+    private final Map<String, Integer> highwaySpeeds = new HashMap<String, Integer>();
     // convert network tag of bicycle routes into a way route code
     private final Map<String, Integer> bikeNetworkToCode = new HashMap<String, Integer>();
     protected EncodedValue relationCodeEncoder;
     private EncodedValue wayTypeEncoder;
-    private EncodedValue preferWayEncoder;
+    EncodedValue priorityWayEncoder;
+
+    // Car speed limit which switches the preference from UNCHANGED to AVOID_IF_POSSIBLE
+    private int avoidSpeedLimit;
+
+    // This is the specific bicycle class
+    private String specificBicycleClass;
 
     protected BikeCommonFlagEncoder( int speedBits, double speedFactor, int maxTurnCosts )
     {
@@ -65,6 +73,8 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         restrictedValues.add("private");
         restrictedValues.add("no");
         restrictedValues.add("restricted");
+        restrictedValues.add("military");
+        restrictedValues.add("emergency");
 
         intendedValues.add("yes");
         intendedValues.add("designated");
@@ -80,9 +90,11 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         // potentialBarriers.add("lift_gate");
         potentialBarriers.add("swing_gate");
 
-        absoluteBarriers.add("kissing_gate");
         absoluteBarriers.add("stile");
         absoluteBarriers.add("turnstile");
+
+        // make intermodal connections possible but mark as pushing section
+        acceptedRailways.add("platform");
 
         unpavedSurfaceTags.add("unpaved");
         unpavedSurfaceTags.add("gravel");
@@ -112,6 +124,8 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         roadValues.add("secondary_link");
         roadValues.add("tertiary");
         roadValues.add("tertiary_link");
+
+        maxPossibleSpeed = 30;
 
         setTrackTypeSpeed("grade1", 18); // paved
         setTrackTypeSpeed("grade2", 12); // now unpaved ...
@@ -150,7 +164,7 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         setHighwaySpeed("steps", PUSHING_SECTION_SPEED / 2);
 
         setHighwaySpeed("cycleway", 18);
-        setHighwaySpeed("path", 18);
+        setHighwaySpeed("path", 12);
         setHighwaySpeed("footway", 6);
         setHighwaySpeed("pedestrian", 6);
         setHighwaySpeed("track", 12);
@@ -183,6 +197,16 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         setCyclingNetworkPreference("mtb", PriorityCode.UNCHANGED.getValue());
 
         setCyclingNetworkPreference("deprecated", PriorityCode.AVOID_AT_ALL_COSTS.getValue());
+
+        setAvoidSpeedLimit(71);
+
+        conditionalTagsInspector = new ConditionalTagsInspector(restrictions, restrictedValues, intendedValues);
+    }
+
+    @Override
+    public int getVersion()
+    {
+        return 1;
     }
 
     @Override
@@ -190,7 +214,8 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
     {
         // first two bits are reserved for route handling in superclass
         shift = super.defineWayBits(index, shift);
-        speedEncoder = new EncodedDoubleValue("Speed", shift, speedBits, speedFactor, highwaySpeed.get("cycleway"), 30);
+        speedEncoder = new EncodedDoubleValue("Speed", shift, speedBits, speedFactor, highwaySpeeds.get("cycleway"),
+                maxPossibleSpeed);
         shift += speedEncoder.getBits();
 
         unpavedBit = 1L << shift++;
@@ -198,8 +223,8 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         wayTypeEncoder = new EncodedValue("WayType", shift, 2, 1, 0, 3, true);
         shift += wayTypeEncoder.getBits();
 
-        preferWayEncoder = new EncodedValue("PreferWay", shift, 3, 1, 0, 7);
-        shift += preferWayEncoder.getBits();
+        priorityWayEncoder = new EncodedValue("PreferWay", shift, 3, 1, 0, 7);
+        shift += priorityWayEncoder.getBits();
 
         return shift;
     }
@@ -219,22 +244,27 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         {
             if (way.hasTag("route", ferries))
             {
-                // if bike is NOT explictly tagged allow bike but only if foot is not specified
+                // if bike is NOT explicitly tagged allow bike but only if foot is not specified
                 String bikeTag = way.getTag("bicycle");
                 if (bikeTag == null && !way.hasTag("foot") || "yes".equals(bikeTag))
                     return acceptBit | ferryBit;
             }
+
+            // special case not for all acceptedRailways, only platform
+            if (way.hasTag("railway", "platform"))
+                return acceptBit;
+
             return 0;
         }
 
-        if (!highwaySpeed.containsKey(highwayValue))
+        if (!highwaySpeeds.containsKey(highwayValue))
             return 0;
 
         // use the way if it is tagged for bikes
         if (way.hasTag("bicycle", intendedValues))
             return acceptBit;
 
-        // accept only if explicitely tagged for bike usage
+        // accept only if explicitly tagged for bike usage
         if ("motorway".equals(highwayValue) || "motorway_link".equals(highwayValue))
             return 0;
 
@@ -246,7 +276,7 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
             return 0;
 
         // check access restrictions
-        if (way.hasTag(restrictions, restrictedValues))
+        if (way.hasTag(restrictions, restrictedValues) && !conditionalTagsInspector.isRestrictedWayConditionallyPermitted(way))
             return 0;
 
         // do not accept railways (sometimes incorrectly mapped!)
@@ -256,16 +286,23 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         String sacScale = way.getTag("sac_scale");
         if (sacScale != null)
         {
+            if ((way.hasTag("highway", "cycleway"))
+                    && (way.hasTag("sac_scale", "hiking")))
+                return acceptBit;
             if (!allowedSacScale(sacScale))
                 return 0;
         }
-        return acceptBit;
+
+        if (conditionalTagsInspector.isPermittedWayConditionallyRestricted(way))
+            return 0;
+        else
+            return acceptBit;
     }
 
     boolean allowedSacScale( String sacScale )
     {
-        // other scales are nearly impossible by bike, see http://wiki.openstreetmap.org/wiki/Key:sac_scale
-        return "hiking".equals(sacScale) || "mountain_hiking".equals(sacScale);
+        // other scales are nearly impossible by an ordinary bike, see http://wiki.openstreetmap.org/wiki/Key:sac_scale
+        return "hiking".equals(sacScale);
     }
 
     @Override
@@ -288,6 +325,30 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         return oldRelationFlags;
     }
 
+     /**
+     * Apply maxspeed: In contrast to the implementation of the AbstractFlagEncoder, 
+     * we assume that we can reach the maxspeed for bicycles in case that the road 
+     * type speed is higher and not just only 90%.
+     * <p>
+     * @param way: needed to retrieve OSM tags
+     * @param speed: speed guessed e.g. from the road type or other tags
+     * @return The assumed avererage speed.
+     */
+    @Override
+    protected double applyMaxSpeed( OSMWay way, double speed)
+    {
+        double maxSpeed = getMaxSpeed(way);
+        if (maxSpeed >= 0)
+        {
+            // We strictly obay speed limits, see #600
+            if ( maxSpeed < speed )
+            {
+                    return maxSpeed;
+            }
+        }
+        return speed;
+    }
+    
     @Override
     public long handleWayTags( OSMWay way, long allowed, long relationFlags )
     {
@@ -295,66 +356,79 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
             return 0;
 
         long encoded = 0;
+        double wayTypeSpeed = getSpeed(way);
         if (!isFerry(allowed))
         {
-            double speed = getSpeed(way);
-            int priorityFromRelation = 0;
-            if (relationFlags != 0)
-                priorityFromRelation = (int) relationCodeEncoder.getValue(relationFlags);
-
-            encoded = setLong(encoded, PriorityWeighting.KEY, handlePriority(way, priorityFromRelation));
-
-            // bike maxspeed handling is different from car as we don't increase speed
-            speed = applyMaxSpeed(way, speed, false);
-            encoded = handleSpeed(way, speed, encoded);
+            wayTypeSpeed = applyMaxSpeed(way, wayTypeSpeed);
+            encoded = handleSpeed(way, wayTypeSpeed, encoded);
             encoded = handleBikeRelated(way, encoded, relationFlags > UNCHANGED.getValue());
+
+            boolean isRoundabout = way.hasTag("junction", "roundabout");
+            if (isRoundabout)
+            {
+                encoded = setBool(encoded, K_ROUNDABOUT, true);
+            }
 
         } else
         {
             encoded = handleFerryTags(way,
-                    highwaySpeed.get("living_street"),
-                    highwaySpeed.get("track"),
-                    highwaySpeed.get("primary"));
+                    highwaySpeeds.get("living_street"),
+                    highwaySpeeds.get("track"),
+                    highwaySpeeds.get("primary"));
             encoded |= directionBitMask;
         }
+        int priorityFromRelation = 0;
+        if (relationFlags != 0)
+            priorityFromRelation = (int) relationCodeEncoder.getValue(relationFlags);
+
+        encoded = priorityWayEncoder.setValue(encoded, handlePriority(way, wayTypeSpeed, priorityFromRelation));
         return encoded;
     }
 
     int getSpeed( OSMWay way )
     {
         int speed = PUSHING_SECTION_SPEED;
+        String highwayTag = way.getTag("highway");
+        Integer highwaySpeed = highwaySpeeds.get(highwayTag);
+
         String s = way.getTag("surface");
         if (!Helper.isEmpty(s))
         {
-            Integer sInt = surfaceSpeed.get(s);
-            if (sInt != null)
-                speed = sInt;
+            Integer surfaceSpeed = surfaceSpeeds.get(s);
+            if (surfaceSpeed != null)
+            {
+                speed = surfaceSpeed;
+                // Boost handling for good surfaces
+                if (highwaySpeed != null && surfaceSpeed > highwaySpeed)
+                {
+                    // Avoid boosting if pushing section
+                    if (pushingSections.contains(highwayTag))
+                        speed = highwaySpeed;
+                    else
+                        speed = surfaceSpeed;
+                }
+            }
         } else
         {
             String tt = way.getTag("tracktype");
             if (!Helper.isEmpty(tt))
             {
-                Integer tInt = trackTypeSpeed.get(tt);
+                Integer tInt = trackTypeSpeeds.get(tt);
                 if (tInt != null)
                     speed = tInt;
             } else
             {
-                String highway = way.getTag("highway");
-                if (!Helper.isEmpty(highway))
+                if (highwaySpeed != null)
                 {
-                    Integer hwInt = highwaySpeed.get(highway);
-                    if (hwInt != null)
-                    {
-                        if (way.getTag("service") == null)
-                            speed = hwInt;
-                        else
-                            speed = highwaySpeed.get("living_street");
-                    }
+                    if (!way.hasTag("service"))
+                        speed = highwaySpeed;
+                    else
+                        speed = highwaySpeeds.get("living_street");
                 }
             }
         }
 
-        // Until now we assumed that the way is no pusing section
+        // Until now we assumed that the way is no pushing section
         // Now we check, but only in case that our speed is bigger compared to the PUSHING_SECTION_SPEED
         if ((speed > PUSHING_SECTION_SPEED)
                 && (!way.hasTag("bicycle", intendedValues) && way.hasTag("highway", pushingSections)))
@@ -423,7 +497,7 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
      * <p>
      * @return new priority based on priorityFromRelation and on the tags in OSMWay.
      */
-    protected int handlePriority( OSMWay way, int priorityFromRelation )
+    protected int handlePriority( OSMWay way, double wayTypeSpeed, int priorityFromRelation )
     {
         TreeMap<Double, Integer> weightToPrioMap = new TreeMap<Double, Integer>();
         if (priorityFromRelation == 0)
@@ -431,17 +505,50 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         else
             weightToPrioMap.put(110d, priorityFromRelation);
 
-        collect(way, weightToPrioMap);
+        collect(way, wayTypeSpeed, weightToPrioMap);
 
         // pick priority with biggest order value
         return weightToPrioMap.lastEntry().getValue();
+    }
+
+    // Conversion of class value to priority. See http://wiki.openstreetmap.org/wiki/Class:bicycle
+    private PriorityCode convertClassValueToPriority( String tagvalue )
+    {
+        int classvalue;
+        try
+        {
+            classvalue = Integer.parseInt(tagvalue);
+        } catch (NumberFormatException e)
+        {
+            return PriorityCode.UNCHANGED;
+        }
+
+        switch (classvalue)
+        {
+            case 3:
+                return PriorityCode.BEST;
+            case 2:
+                return PriorityCode.VERY_NICE;
+            case 1:
+                return PriorityCode.PREFER;
+            case 0:
+                return PriorityCode.UNCHANGED;
+            case -1:
+                return PriorityCode.AVOID_IF_POSSIBLE;
+            case -2:
+                return PriorityCode.REACH_DEST;
+            case -3:
+                return PriorityCode.AVOID_AT_ALL_COSTS;
+            default:
+                return PriorityCode.UNCHANGED;
+        }
     }
 
     /**
      * @param weightToPrioMap associate a weight with every priority. This sorted map allows
      * subclasses to 'insert' more important priorities as well as overwrite determined priorities.
      */
-    void collect( OSMWay way, TreeMap<Double, Integer> weightToPrioMap )
+    void collect( OSMWay way, double wayTypeSpeed, TreeMap<Double, Integer> weightToPrioMap )
     {
         String service = way.getTag("service");
         String highway = way.getTag("highway");
@@ -453,23 +560,55 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         double maxSpeed = getMaxSpeed(way);
         if (preferHighwayTags.contains(highway) || maxSpeed > 0 && maxSpeed <= 30)
         {
-            weightToPrioMap.put(40d, PREFER.getValue());
-            if (way.hasTag("tunnel", intendedValues))
-                weightToPrioMap.put(40d, UNCHANGED.getValue());
+            if (maxSpeed < avoidSpeedLimit)
+            {
+                weightToPrioMap.put(40d, PREFER.getValue());
+                if (way.hasTag("tunnel", intendedValues))
+                    weightToPrioMap.put(40d, UNCHANGED.getValue());
+            }
+        } else
+        {
+            if (avoidHighwayTags.contains(highway)
+                    || maxSpeed >= avoidSpeedLimit && !"track".equals(highway))
+            {
+                weightToPrioMap.put(50d, REACH_DEST.getValue());
+                if (way.hasTag("tunnel", intendedValues))
+                    weightToPrioMap.put(50d, AVOID_AT_ALL_COSTS.getValue());
+            }
         }
 
-        if (pushingSections.contains(highway) || "parking_aisle".equals(service))
-            weightToPrioMap.put(50d, AVOID_IF_POSSIBLE.getValue());
-
-        if (avoidHighwayTags.contains(highway) || maxSpeed > 80)
+        if (pushingSections.contains(highway)
+                || way.hasTag("bicycle", "use_sidepath")
+                || "parking_aisle".equals(service))
         {
-            weightToPrioMap.put(50d, REACH_DEST.getValue());
-            if (way.hasTag("tunnel", intendedValues))
-                weightToPrioMap.put(50d, AVOID_AT_ALL_COSTS.getValue());
+            if (way.hasTag("bicycle", "yes"))
+                weightToPrioMap.put(100d, UNCHANGED.getValue());
+            else
+                weightToPrioMap.put(50d, AVOID_IF_POSSIBLE.getValue());
         }
 
         if (way.hasTag("railway", "tram"))
             weightToPrioMap.put(50d, AVOID_AT_ALL_COSTS.getValue());
+
+        String classBicycleSpecific = way.getTag(specificBicycleClass);
+        if (classBicycleSpecific != null)
+        {
+            // We assume that humans are better in classifying preferences compared to our algorithm above -> weight = 100
+            weightToPrioMap.put(100d, convertClassValueToPriority(classBicycleSpecific).getValue());
+        } else
+        {
+            String classBicycle = way.getTag("class:bicycle");
+            if (classBicycle != null)
+                weightToPrioMap.put(100d, convertClassValueToPriority(classBicycle).getValue());
+        }
+        
+        // Increase the priority for scenic routes or in case that maxspeed limits our average speed as compensation. See #630
+        if (way.hasTag("scenic", "yes") || ((maxSpeed > 0) && (maxSpeed < wayTypeSpeed)))
+        {
+            if (weightToPrioMap.lastEntry().getValue() < BEST.getValue())
+                // Increase the prio by one step
+                weightToPrioMap.put(110d, weightToPrioMap.lastEntry().getValue() + 1);
+        }
     }
 
     /**
@@ -481,12 +620,7 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         String highway = way.getTag("highway");
         String trackType = way.getTag("tracktype");
 
-        // Populate bits at wayTypeMask with wayType            
-        WayType wayType = WayType.OTHER_SMALL_WAY;
-        boolean isPusingSection = isPushingSection(way);
-        if (isPusingSection && !partOfCycleRelation || "steps".equals(highway))
-            wayType = WayType.PUSHING_SECTION;
-
+        // Populate unpavedBit
         if ("track".equals(highway) && (trackType == null || !"grade1".equals(trackType))
                 || "path".equals(highway) && surfaceTag == null
                 || unpavedSurfaceTags.contains(surfaceTag))
@@ -494,16 +628,24 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
             encoded = setBool(encoded, K_UNPAVED, true);
         }
 
+        WayType wayType;
+        if (roadValues.contains(highway))
+            wayType = WayType.ROAD;
+        else
+            wayType = WayType.OTHER_SMALL_WAY;
+
+        boolean isPushingSection = isPushingSection(way);
+        if (isPushingSection && !partOfCycleRelation || "steps".equals(highway))
+            wayType = WayType.PUSHING_SECTION;
+
         if (way.hasTag("bicycle", intendedValues))
         {
-            if (isPusingSection && !way.hasTag("bicycle", "designated"))
+            if (isPushingSection && !way.hasTag("bicycle", "designated"))
                 wayType = WayType.OTHER_SMALL_WAY;
-            else
+            else if (wayType == WayType.OTHER_SMALL_WAY || wayType == WayType.PUSHING_SECTION)
                 wayType = WayType.CYCLEWAY;
         } else if ("cycleway".equals(highway))
             wayType = WayType.CYCLEWAY;
-        else if (roadValues.contains(highway))
-            wayType = WayType.ROAD;
 
         return wayTypeEncoder.setValue(encoded, wayType.getValue());
     }
@@ -538,55 +680,38 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         switch (key)
         {
             case PriorityWeighting.KEY:
-                double prio = preferWayEncoder.getValue(flags);
-                if (prio == 0)
-                    return (double) UNCHANGED.getValue() / BEST.getValue();
-
-                return prio / BEST.getValue();
+                return (double) priorityWayEncoder.getValue(flags) / BEST.getValue();
             default:
                 return super.getDouble(flags, key);
         }
     }
 
-    @Override
-    public long getLong( long flags, int key )
-    {
-        switch (key)
-        {
-            case PriorityWeighting.KEY:
-                return preferWayEncoder.getValue(flags);
-            default:
-                return super.getLong(flags, key);
-        }
-    }
-
-    @Override
-    public long setLong( long flags, int key, long value )
-    {
-        switch (key)
-        {
-            case PriorityWeighting.KEY:
-                return preferWayEncoder.setValue(flags, value);
-            default:
-                return super.setLong(flags, key, value);
-        }
-    }
-
     boolean isPushingSection( OSMWay way )
     {
-        return way.hasTag("highway", pushingSections);
+        return way.hasTag("highway", pushingSections) || way.hasTag("railway", "platform");
     }
 
     protected long handleSpeed( OSMWay way, double speed, long encoded )
     {
         encoded = setSpeed(encoded, speed);
 
-        // handle oneways
-        if ((way.hasTag("oneway", oneways) || way.hasTag("junction", "roundabout"))
+        // handle oneways        
+        boolean isOneway = way.hasTag("oneway", oneways)
+                || way.hasTag("oneway:bicycle", oneways)
+                || way.hasTag("vehicle:backward")
+                || way.hasTag("vehicle:forward")
+                || way.hasTag("bicycle:forward");
+
+        if ((isOneway || way.hasTag("junction", "roundabout"))
                 && !way.hasTag("oneway:bicycle", "no")
+                && !way.hasTag("bicycle:backward")
                 && !way.hasTag("cycleway", oppositeLanes))
         {
-            if (way.hasTag("oneway", "-1"))
+            boolean isBackward = way.hasTag("oneway", "-1")
+                    || way.hasTag("oneway:bicycle", "-1")
+                    || way.hasTag("vehicle:forward", "no")
+                    || way.hasTag("bicycle:forward", "no");
+            if (isBackward)
                 encoded |= backwardBit;
             else
                 encoded |= forwardBit;
@@ -616,26 +741,26 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
         {
             return value;
         }
-    };
+    }
 
     protected void setHighwaySpeed( String highway, int speed )
     {
-        highwaySpeed.put(highway, speed);
+        highwaySpeeds.put(highway, speed);
     }
 
     protected int getHighwaySpeed( String key )
     {
-        return highwaySpeed.get(key);
+        return highwaySpeeds.get(key);
     }
 
     void setTrackTypeSpeed( String tracktype, int speed )
     {
-        trackTypeSpeed.put(tracktype, speed);
+        trackTypeSpeeds.put(tracktype, speed);
     }
 
     void setSurfaceSpeed( String surface, int speed )
     {
-        surfaceSpeed.put(surface, speed);
+        surfaceSpeeds.put(surface, speed);
     }
 
     void setCyclingNetworkPreference( String network, int code )
@@ -655,5 +780,15 @@ public class BikeCommonFlagEncoder extends AbstractFlagEncoder
             return true;
 
         return PriorityWeighting.class.isAssignableFrom(feature);
+    }
+
+    public void setAvoidSpeedLimit( int limit )
+    {
+        avoidSpeedLimit = limit;
+    }
+
+    public void setSpecificBicycleClass( String subkey )
+    {
+        specificBicycleClass = "class:bicycle:" + subkey;
     }
 }

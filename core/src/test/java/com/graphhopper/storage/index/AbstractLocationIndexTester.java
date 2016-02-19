@@ -21,21 +21,20 @@ import com.graphhopper.routing.util.CarFlagEncoder;
 import com.graphhopper.routing.util.DefaultEdgeFilter;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.util.FootFlagEncoder;
-import com.graphhopper.storage.Directory;
-import com.graphhopper.storage.Graph;
-import com.graphhopper.storage.GraphHopperStorage;
-import com.graphhopper.storage.MMapDirectory;
-import com.graphhopper.storage.NodeAccess;
-import com.graphhopper.storage.RAMDirectory;
+import com.graphhopper.storage.*;
 import com.graphhopper.util.DistanceCalc;
 import com.graphhopper.util.DistanceCalcEarth;
 import com.graphhopper.util.EdgeIterator;
 import com.graphhopper.util.Helper;
+
 import java.io.Closeable;
 import java.io.File;
 import java.util.Random;
+
 import org.junit.After;
+
 import static org.junit.Assert.*;
+
 import org.junit.Before;
 import org.junit.Test;
 
@@ -48,6 +47,16 @@ public abstract class AbstractLocationIndexTester
     LocationIndex idx;
 
     public abstract LocationIndex createIndex( Graph g, int resolution );
+
+    GraphHopperStorage createGHStorage( EncodingManager encodingManager )
+    {
+        return AbstractLocationIndexTester.this.createGHStorage(new RAMDirectory(), encodingManager, false);
+    }
+
+    GraphHopperStorage createGHStorage( Directory dir, EncodingManager encodingManager, boolean is3D )
+    {
+        return new GraphHopperStorage(dir, encodingManager, is3D, new GraphExtension.NoOpExtension()).create(100);
+    }
 
     public boolean hasEdgeSupport()
     {
@@ -71,10 +80,10 @@ public abstract class AbstractLocationIndexTester
     @Test
     public void testSimpleGraph()
     {
-        Graph g = createGraph(new EncodingManager("CAR"));
+        Graph g = AbstractLocationIndexTester.this.createGHStorage(new EncodingManager("CAR"));
         initSimpleGraph(g);
 
-        idx = createIndex(g, 8);
+        idx = createIndex(g, -1);
         assertEquals(4, idx.findID(5, 2));
         assertEquals(3, idx.findID(1.5, 2));
         assertEquals(0, idx.findID(-1, -1));
@@ -125,10 +134,10 @@ public abstract class AbstractLocationIndexTester
     @Test
     public void testSimpleGraph2()
     {
-        Graph g = createGraph(new EncodingManager("CAR"));
+        Graph g = AbstractLocationIndexTester.this.createGHStorage(new EncodingManager("CAR"));
         initSimpleGraph(g);
 
-        idx = createIndex(g, 28);
+        idx = createIndex(g, -1);
         assertEquals(4, idx.findID(5, 2));
         assertEquals(3, idx.findID(1.5, 2));
         assertEquals(0, idx.findID(-1, -1));
@@ -153,7 +162,7 @@ public abstract class AbstractLocationIndexTester
         Graph g = createSampleGraph(new EncodingManager("CAR"));
         int locs = g.getNodes();
 
-        idx = createIndex(g, 120);
+        idx = createIndex(g, -1);
         // if we would use less array entries then some points gets the same key so avoid that for this test
         // e.g. for 16 we get "expected 6 but was 9" i.e 6 was overwritten by node j9 which is a bit closer to the grid center        
         // go through every point of the graph if all points are reachable
@@ -211,7 +220,7 @@ public abstract class AbstractLocationIndexTester
     public void testSinglePoints120()
     {
         Graph g = createSampleGraph(new EncodingManager("CAR"));
-        idx = createIndex(g, 120);
+        idx = createIndex(g, -1);
 
         assertEquals(1, idx.findID(1.637, 2.23));
         assertEquals(10, idx.findID(3.649, 1.375));
@@ -227,7 +236,7 @@ public abstract class AbstractLocationIndexTester
     public void testSinglePoints32()
     {
         Graph g = createSampleGraph(new EncodingManager("CAR"));
-        idx = createIndex(g, 32);
+        idx = createIndex(g, -1);
 
         // 10 or 6
         assertEquals(10, idx.findID(3.649, 1.375));
@@ -248,7 +257,7 @@ public abstract class AbstractLocationIndexTester
     {
         final EncodingManager encodingManager = new EncodingManager("CAR");
         int locs = 10000;
-        Graph g = createGraph(new MMapDirectory(location), encodingManager, false);
+        Graph g = AbstractLocationIndexTester.this.createGHStorage(new MMapDirectory(location), encodingManager, false);
         NodeAccess na = g.getNodeAccess();
         Random rand = new Random(12);
         for (int i = 0; i < locs; i++)
@@ -259,19 +268,9 @@ public abstract class AbstractLocationIndexTester
         Helper.close((Closeable) g);
     }
 
-    Graph createGraph( EncodingManager encodingManager )
-    {
-        return createGraph(new RAMDirectory(), encodingManager, false);
-    }
-
-    Graph createGraph( Directory dir, EncodingManager encodingManager, boolean is3D )
-    {
-        return new GraphHopperStorage(dir, encodingManager, is3D).create(100);
-    }
-
     public Graph createSampleGraph( EncodingManager encodingManager )
     {
-        Graph graph = createGraph(encodingManager);
+        Graph graph = AbstractLocationIndexTester.this.createGHStorage(encodingManager);
         // length does not matter here but lat,lon and outgoing edges do!
 
 //        
@@ -353,9 +352,9 @@ public abstract class AbstractLocationIndexTester
     public void testDifferentVehicles()
     {
         final EncodingManager encodingManager = new EncodingManager("CAR,FOOT");
-        Graph g = createGraph(encodingManager);
+        Graph g = AbstractLocationIndexTester.this.createGHStorage(encodingManager);
         initSimpleGraph(g);
-        idx = createIndex(g, 32);
+        idx = createIndex(g, -1);
         assertEquals(1, idx.findID(1, -1));
 
         // now make all edges from node 1 accessible for CAR only
@@ -367,7 +366,7 @@ public abstract class AbstractLocationIndexTester
         }
         idx.close();
 
-        idx = createIndex(g, 32);
+        idx = createIndex(g, -1);
         FootFlagEncoder footEncoder = (FootFlagEncoder) encodingManager.getEncoder("FOOT");
         assertEquals(2, idx.findClosest(1, -1, new DefaultEdgeFilter(footEncoder)).getClosestNode());
         Helper.close((Closeable) g);

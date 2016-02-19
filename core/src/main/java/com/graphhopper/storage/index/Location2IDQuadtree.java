@@ -27,7 +27,9 @@ import com.graphhopper.storage.*;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
 import com.graphhopper.util.shapes.GHPoint;
+
 import java.util.Arrays;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,11 +37,11 @@ import org.slf4j.LoggerFactory;
  * This class implements map matching and returns a node index from lat,lon coordinate. This
  * implementation is the a very memory efficient representation for areas with lots of node and
  * edges, but lacks precision. No edge distances are measured.
- * <p/>
+ * <p>
+ * @author Peter Karich
  * @see LocationIndexTree which is more precise but more complicated and also slightly slower
  * implementation of LocationIndex.
- * <p/>
- * @author Peter Karich
+ * <p>
  */
 class Location2IDQuadtree implements LocationIndex
 {
@@ -80,8 +82,8 @@ class Location2IDQuadtree implements LocationIndex
 
     /**
      * Loads the index from disc if exists. Make sure you are using the identical graph which was
-     * used while flusing this index.
-     * <p/>
+     * used while flushing this index.
+     * <p>
      * @return if loading from file was successfully.
      */
     @Override
@@ -222,7 +224,7 @@ class Location2IDQuadtree implements LocationIndex
         int initializedCounter = filledIndices.getCardinality();
         // fan out initialized entries to avoid "nose-artifacts"
         // we 1. do not use the same index for check and set and iterate until all indices are set
-        // and 2. use a taken-from array to decide which of the colliding should be prefered
+        // and 2. use a taken-from array to decide which of the colliding should be preferred
         int[] takenFrom = new int[len];
         Arrays.fill(takenFrom, -1);
         for (int i = filledIndices.next(0); i >= 0; i = filledIndices.next(i + 1))
@@ -316,7 +318,7 @@ class Location2IDQuadtree implements LocationIndex
 
     @Override
     public QueryResult findClosest( final double queryLat, final double queryLon,
-            final EdgeFilter edgeFilter )
+                                    final EdgeFilter edgeFilter )
     {
         if (isClosed())
             throw new IllegalStateException("You need to create a new LocationIndex instance as it is already closed");

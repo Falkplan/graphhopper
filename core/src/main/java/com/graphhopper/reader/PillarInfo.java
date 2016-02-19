@@ -57,26 +57,28 @@ public class PillarInfo implements PointAccess
     }
 
     @Override
-    public void setNode( int id, double lat, double lon )
+    public void ensureNode( int nodeId )
     {
-//        if (is3D())
-//            throw new IllegalStateException("Can only be called if 3D is disabled");
-
-        _setNode(id, lat, lon, Double.NaN);
+        long tmp = (long) nodeId * rowSizeInBytes;
+        da.ensureCapacity(tmp + rowSizeInBytes);
     }
 
     @Override
-    public void setNode( int id, double lat, double lon, double ele )
+    public void setNode( int nodeId, double lat, double lon )
     {
-//        if (!is3D())
-//            throw new IllegalStateException("Can only be called if 3D is enabled");
-        _setNode(id, lat, lon, ele);
+        _setNode(nodeId, lat, lon, Double.NaN);
     }
 
-    private void _setNode( int id, double lat, double lon, double ele )
+    @Override
+    public void setNode( int nodeId, double lat, double lon, double ele )
     {
-        long tmp = (long) id * rowSizeInBytes;
-        da.ensureCapacity(tmp + rowSizeInBytes);
+        _setNode(nodeId, lat, lon, ele);
+    }
+
+    private void _setNode( int nodeId, double lat, double lon, double ele )
+    {
+        ensureNode(nodeId);
+        long tmp = (long) nodeId * rowSizeInBytes;
         da.setInt(tmp + LAT, Helper.degreeToInt(lat));
         da.setInt(tmp + LON, Helper.degreeToInt(lon));
 

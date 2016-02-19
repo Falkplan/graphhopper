@@ -18,27 +18,36 @@
 package com.graphhopper.routing.util;
 
 import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.PMap;
 
 /**
  * Calculates the fastest route with the specified vehicle (VehicleEncoder). Calculates the weight
  * in seconds.
- * <p/>
+ * <p>
+ *
  * @author Peter Karich
  */
-public class FastestWeighting implements Weighting
+public class FastestWeighting extends AbstractWeighting
 {
     /**
-     * Converting to seconds is not necessary but makes adding other penalities easier (e.g. turn
+     * Converting to seconds is not necessary but makes adding other penalties easier (e.g. turn
      * costs or traffic light costs etc)
      */
     protected final static double SPEED_CONV = 3.6;
-    protected final FlagEncoder encoder;
+    final static double DEFAULT_HEADING_PENALTY = 300; //[s]
+    private final double headingPenalty;
     private final double maxSpeed;
+
+    public FastestWeighting( FlagEncoder encoder, PMap pMap )
+    {
+        super(encoder);
+        headingPenalty = pMap.getDouble("heading_penalty", DEFAULT_HEADING_PENALTY);
+        maxSpeed = encoder.getMaxSpeed() / SPEED_CONV;
+    }
 
     public FastestWeighting( FlagEncoder encoder )
     {
-        this.encoder = encoder;
-        maxSpeed = encoder.getMaxSpeed() * SPEED_CONV;
+        this(encoder, new PMap(0));
     }
 
     @Override
@@ -49,16 +58,24 @@ public class FastestWeighting implements Weighting
 
     @Override
     public double calcWeight( EdgeIteratorState edge, boolean reverse, int prevOrNextEdgeId )
-    {        
-        double speed = reverse ? encoder.getReverseSpeed(edge.getFlags()) : encoder.getSpeed(edge.getFlags());
+    {
+        double speed = reverse ? flagEncoder.getReverseSpeed(edge.getFlags()) : flagEncoder.getSpeed(edge.getFlags());
         if (speed == 0)
             return Double.POSITIVE_INFINITY;
-        return edge.getDistance() / (speed * SPEED_CONV);
+
+        double time = edge.getDistance() / speed * SPEED_CONV;
+
+        // add direction penalties at start/stop/via points
+        boolean penalizeEdge = edge.getBoolean(EdgeIteratorState.K_UNFAVORED_EDGE, reverse, false);
+        if (penalizeEdge)
+            time += headingPenalty;
+
+        return time;
     }
 
     @Override
-    public String toString()
+    public String getName()
     {
-        return "FASTEST|" + encoder;
+        return "fastest";
     }
 }

@@ -17,14 +17,16 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.GHResponse;
+import com.graphhopper.PathWrapper;
 import com.graphhopper.routing.*;
 import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.CHGraph;
 import com.graphhopper.storage.TurnCostExtension;
 import com.graphhopper.storage.index.LocationIndex;
 import com.graphhopper.storage.index.QueryResult;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.GHPoint;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -45,10 +47,10 @@ public class TestAlgoCollector
     }
 
     public TestAlgoCollector assertDistance( AlgoHelperEntry algoEntry, List<QueryResult> queryList,
-            OneRun oneRun )
+                                             OneRun oneRun )
     {
-        List<Path> viaPaths = new ArrayList<Path>();
-        QueryGraph queryGraph = new QueryGraph(algoEntry.originalGraph);
+        List<Path> altPaths = new ArrayList<Path>();
+        QueryGraph queryGraph = new QueryGraph(algoEntry.getQueryGraph());
         queryGraph.lookup(queryList);
         AlgorithmOptions opts = algoEntry.opts;
         FlagEncoder encoder = opts.getFlagEncoder();
@@ -57,23 +59,23 @@ public class TestAlgoCollector
 
         for (int i = 0; i < queryList.size() - 1; i++)
         {
-            Path path = algoEntry.createAlgo(queryGraph).
-                    calcPath(queryList.get(i).getClosestNode(), queryList.get(i + 1).getClosestNode());
+            RoutingAlgorithm algo = algoEntry.createAlgo(queryGraph);
+            Path path = algo.calcPath(queryList.get(i).getClosestNode(), queryList.get(i + 1).getClosestNode());
             // System.out.println(path.calcInstructions().createGPX("temp", 0, "GMT"));
-            viaPaths.add(path);
+            altPaths.add(path);
         }
 
         PathMerger pathMerger = new PathMerger().
                 setCalcPoints(true).
                 setSimplifyResponse(false).
                 setEnableInstructions(true);
-        GHResponse rsp = new GHResponse();
-        pathMerger.doWork(rsp, viaPaths, trMap.getWithFallBack(Locale.US));
+        PathWrapper rsp = new PathWrapper();
+        pathMerger.doWork(rsp, altPaths, trMap.getWithFallBack(Locale.US));
 
-        if (!rsp.isFound())
+        if (rsp.hasErrors())
         {
-            errors.add(algoEntry + " returns no path! expected distance: " + rsp.getDistance()
-                    + ", expected points: " + oneRun + ". " + queryList);
+            errors.add(algoEntry + " response contains errors. Expected distance: " + rsp.getDistance()
+                    + ", expected points: " + oneRun + ". " + queryList + ", errors:" + rsp.getErrors());
             return this;
         }
 
@@ -148,15 +150,32 @@ public class TestAlgoCollector
 
     public static class AlgoHelperEntry
     {
-        private Graph originalGraph;
+        private Graph queryGraph;
+        private final Graph baseGraph;
         private final LocationIndex idx;
         private AlgorithmOptions opts;
 
-        public AlgoHelperEntry( Graph g, AlgorithmOptions opts, LocationIndex idx )
+        public AlgoHelperEntry( Graph g, Graph baseGraph, AlgorithmOptions opts, LocationIndex idx )
         {
-            this.originalGraph = g;
+            this.queryGraph = g;
+            this.baseGraph = baseGraph;
             this.opts = opts;
             this.idx = idx;
+        }
+
+        public Graph getQueryGraph()
+        {
+            return queryGraph;
+        }
+
+        public void setQueryGraph( Graph queryGraph )
+        {
+            this.queryGraph = queryGraph;
+        }
+
+        public Graph getBaseGraph()
+        {
+            return baseGraph;
         }
 
         public void setAlgorithmOptions( AlgorithmOptions opts )
@@ -177,7 +196,7 @@ public class TestAlgoCollector
         @Override
         public String toString()
         {
-            return opts.getAlgorithm();
+            return opts.getAlgorithm() + (queryGraph instanceof CHGraph ? "CH" : "");
         }
     }
 

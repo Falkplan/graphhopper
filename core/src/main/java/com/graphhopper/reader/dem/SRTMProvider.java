@@ -23,14 +23,16 @@ import com.graphhopper.util.BitUtil;
 import com.graphhopper.util.Downloader;
 import com.graphhopper.util.Helper;
 import gnu.trove.map.hash.TIntObjectHashMap;
+
 import java.io.*;
 import java.net.SocketTimeoutException;
 import java.util.zip.ZipInputStream;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Elevation data from NASA (SRTM). Downloaded from http://dds.cr.usgs.gov/srtm/version2_1/SRTM3/
+ * Elevation data from NASA (SRTM).
  * <p>
  * Important information about SRTM: the coordinates of the lower-left corner of tile N40W118 are 40
  * degrees north latitude and 118 degrees west longitude. To be more exact, these coordinates refer
@@ -62,7 +64,8 @@ public class SRTMProvider implements ElevationProvider
 
     private static final BitUtil BIT_UTIL = BitUtil.BIG;
     private final Logger logger = LoggerFactory.getLogger(getClass());
-    private final int WIDTH = 1201;
+    private final int DEFAULT_WIDTH = 1201;
+    private final int WIDTH_BYTE_INDEX = 0;
     private Directory dir;
     private DAType daType = DAType.MMAP;
     private Downloader downloader = new Downloader("GraphHopper SRTMReader").setTimeout(10000);
@@ -72,7 +75,8 @@ public class SRTMProvider implements ElevationProvider
     private final TIntObjectHashMap<String> areas = new TIntObjectHashMap<String>();
     private final double precision = 1e7;
     private final double invPrecision = 1 / precision;
-    // mirror: base = "http://mirror.ufs.ac.za/datasets/SRTM3/"
+    // possible alternatives see #451
+    // http://mirror.ufs.ac.za/datasets/SRTM3/
     private String baseUrl = "http://dds.cr.usgs.gov/srtm/version2_1/SRTM3/";
     private boolean calcMean = false;
 
@@ -102,10 +106,8 @@ public class SRTMProvider implements ElevationProvider
             };
             for (String str : strs)
             {
-                InputStream is = getClass().getResourceAsStream(str + "_names.txt.zip");
-                ZipInputStream zis = new ZipInputStream(is);
-                zis.getNextEntry();
-                for (String line : Helper.readFile(new InputStreamReader(zis, Helper.UTF_CS)))
+                InputStream is = getClass().getResourceAsStream(str + "_names.txt");
+                for (String line : Helper.readFile(new InputStreamReader(is, Helper.UTF_CS)))
                 {
                     int lat = Integer.parseInt(line.substring(1, 3));
                     if (line.substring(0, 1).charAt(0) == 'S')
@@ -220,91 +222,102 @@ public class SRTMProvider implements ElevationProvider
         lon = (int) (lon * precision) / precision;
         int intKey = calcIntKey(lat, lon);
         HeightTile demProvider = cacheData.get(intKey);
-        if (demProvider == null)
+        if (demProvider != null)
+            return demProvider.getHeight(lat, lon);
+
+        if (!cacheDir.exists())
+            cacheDir.mkdirs();
+
+        String fileDetails = getFileString(lat, lon);
+        if (fileDetails == null)
+            return 0;
+
+        DataAccess heights = getDirectory().find("dem" + intKey);
+        boolean loadExisting = false;
+        try
         {
-            if (!cacheDir.exists())
-                cacheDir.mkdirs();
-
-            String fileDetails = getFileString(lat, lon);
-            if (fileDetails == null)
-                return 0;
-
-            int minLat = down(lat);
-            int minLon = down(lon);
-            demProvider = new HeightTile(minLat, minLon, WIDTH, precision, 1);
-            demProvider.setCalcMean(calcMean);
-            cacheData.put(intKey, demProvider);
-            DataAccess heights = getDirectory().find("dem" + intKey);
-            demProvider.setHeights(heights);
-            boolean loadExisting = false;
-            try
-            {
-                loadExisting = heights.loadExisting();
-            } catch (Exception ex)
-            {
-                logger.warn("cannot load dem" + intKey + ", error:" + ex.getMessage());
-            }
-
-            if (!loadExisting)
-            {
-                byte[] bytes = new byte[2 * WIDTH * WIDTH];
-                heights.create(bytes.length);
-                try
-                {
-                    String zippedURL = baseUrl + "/" + fileDetails + "hgt.zip";
-                    File file = new File(cacheDir, new File(zippedURL).getName());
-                    InputStream is;
-                    // get zip file if not already in cacheDir - unzip later and in-memory only!
-                    if (!file.exists())
-                    {
-                        for (int i = 0; i < 3; i++)
-                        {
-                            try
-                            {
-                                downloader.downloadFile(zippedURL, file.getAbsolutePath());
-                                break;
-                            } catch (SocketTimeoutException ex)
-                            {
-                                // just try again after a little nap
-                                Thread.sleep(2000);
-                                continue;
-                            } catch (FileNotFoundException ex)
-                            {
-                                // now try different URL (with point!), necessary if mirror is used
-                                zippedURL = baseUrl + "/" + fileDetails + ".hgt.zip";
-                                continue;
-                            }
-                        }
-                    }
-
-                    is = new FileInputStream(file);
-                    ZipInputStream zis = new ZipInputStream(is);
-                    zis.getNextEntry();
-                    BufferedInputStream buff = new BufferedInputStream(zis);
-                    int len;
-                    while ((len = buff.read(bytes)) > 0)
-                    {
-                        for (int bytePos = 0; bytePos < len; bytePos += 2)
-                        {
-                            short val = BIT_UTIL.toShort(bytes, bytePos);
-                            if (val < -1000 || val > 12000)
-                                val = Short.MIN_VALUE;
-
-                            heights.setShort(bytePos, val);
-                        }
-                    }
-                    heights.flush();
-
-                    // demProvider.toImage("x" + file.getName() + ".png");
-                    // TODO remove hgt and zip?
-                } catch (Exception ex)
-                {
-                    throw new RuntimeException(ex);
-                }
-            } // loadExisting
+            loadExisting = heights.loadExisting();
+        } catch (Exception ex)
+        {
+            logger.warn("cannot load dem" + intKey + ", error:" + ex.getMessage());
         }
 
+        if (!loadExisting)
+            updateHeightsFromZipFile(fileDetails, heights);
+
+        int width = (int) (Math.sqrt(heights.getHeader(WIDTH_BYTE_INDEX)) + 0.5);
+        if (width == 0)
+            width = DEFAULT_WIDTH;
+
+        demProvider = new HeightTile(down(lat), down(lon), width, precision, 1);
+        demProvider.setCalcMean(calcMean);
+        cacheData.put(intKey, demProvider);
+        demProvider.setHeights(heights);
         return demProvider.getHeight(lat, lon);
+    }
+
+    private void updateHeightsFromZipFile( String fileDetails, DataAccess heights ) throws RuntimeException
+    {
+        try
+        {
+            byte[] bytes = getByteArrayFromZipFile(fileDetails);
+            heights.create(bytes.length);
+            for (int bytePos = 0; bytePos < bytes.length; bytePos += 2)
+            {
+                short val = BIT_UTIL.toShort(bytes, bytePos);
+                if (val < -1000 || val > 12000)
+                    val = Short.MIN_VALUE;
+
+                heights.setShort(bytePos, val);
+            }
+            heights.setHeader(WIDTH_BYTE_INDEX, bytes.length / 2);
+            heights.flush();
+
+        } catch (Exception ex)
+        {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private byte[] getByteArrayFromZipFile( String fileDetails ) throws InterruptedException, FileNotFoundException, IOException
+    {
+        String zippedURL = baseUrl + "/" + fileDetails + ".hgt.zip";
+        File file = new File(cacheDir, new File(zippedURL).getName());
+        InputStream is;
+        // get zip file if not already in cacheDir - unzip later and in-memory only!
+        if (!file.exists())
+            for (int i = 0; i < 3; i++)
+            {
+                try
+                {
+                    downloader.downloadFile(zippedURL, file.getAbsolutePath());
+                    break;
+                } catch (SocketTimeoutException ex)
+                {
+                    // just try again after a little nap
+                    Thread.sleep(2000);
+                    continue;
+                } catch (FileNotFoundException ex)
+                {
+                    // now try different URL (without point!), necessary if mirror is used
+                    zippedURL = baseUrl + "/" + fileDetails + "hgt.zip";
+                    continue;
+                }
+            }
+
+        is = new FileInputStream(file);
+        ZipInputStream zis = new ZipInputStream(is);
+        zis.getNextEntry();
+        BufferedInputStream buff = new BufferedInputStream(zis);
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        byte[] buffer = new byte[0xFFFF];
+        int len;
+        while ((len = buff.read(buffer)) > 0)
+        {
+            os.write(buffer, 0, len);
+        }
+        os.flush();
+        return os.toByteArray();
     }
 
     @Override

@@ -27,6 +27,7 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHolder;
 import java.util.EnumSet;
 import javax.servlet.DispatcherType;
+
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.server.handler.ResourceHandler;
@@ -76,6 +77,7 @@ public class GHServer
         server = new Server();
         // getSessionHandler and getSecurityHandler should always return null
         ServletContextHandler servHandler = new ServletContextHandler(ServletContextHandler.NO_SECURITY | ServletContextHandler.NO_SESSIONS);
+        servHandler.setErrorHandler(new GHErrorHandler());
         servHandler.setContextPath("/");
 
         servHandler.addServlet(new ServletHolder(new InvalidRequestServlet()), "/*");

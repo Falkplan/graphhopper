@@ -17,15 +17,17 @@
  */
 package com.graphhopper.coll;
 
-import com.graphhopper.storage.Edge;
+import com.graphhopper.storage.SPTEntry;
 import com.graphhopper.util.EdgeIterator;
+
 import java.util.PriorityQueue;
 import java.util.Random;
+
 import org.junit.Test;
+
 import static org.junit.Assert.*;
 
 /**
- *
  * @author Peter Karich
  */
 public abstract class AbstractBinHeapTest
@@ -123,7 +125,7 @@ public abstract class AbstractBinHeapTest
     @Test
     public void testSize()
     {
-        PriorityQueue<Edge> juQueue = new PriorityQueue<Edge>(100);
+        PriorityQueue<SPTEntry> juQueue = new PriorityQueue<SPTEntry>(100);
         BinHeapWrapper<Number, Integer> binHeap = createHeap(100);
 
         Random rand = new Random(1);
@@ -132,7 +134,7 @@ public abstract class AbstractBinHeapTest
         {
             int val = rand.nextInt();
             binHeap.insert(val, i);
-            juQueue.add(new Edge(EdgeIterator.NO_EDGE, i, val));
+            juQueue.add(new SPTEntry(EdgeIterator.NO_EDGE, i, val));
         }
 
         assertEquals(juQueue.size(), binHeap.getSize());

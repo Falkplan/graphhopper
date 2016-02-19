@@ -22,8 +22,9 @@ import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.routing.util.TraversalMode;
 import com.graphhopper.routing.util.Weighting;
 import com.graphhopper.storage.Graph;
-import com.graphhopper.storage.EdgeEntry;
+import com.graphhopper.storage.SPTEntry;
 import com.graphhopper.util.EdgeIteratorState;
+
 import java.awt.Color;
 import java.awt.Graphics2D;
 
@@ -48,7 +49,7 @@ public class DebugDijkstraSimple extends Dijkstra implements DebugAlgo
     }
 
     @Override
-    public void updateBestPath( EdgeIteratorState es, EdgeEntry bestEE, int currLoc )
+    public void updateBestPath( EdgeIteratorState es, SPTEntry bestEE, int currLoc )
     {
         if (g2 != null)
         {

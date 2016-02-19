@@ -41,6 +41,7 @@ public class Downloader
                     }
                 });
     }
+
     private String referrer = "http://graphhopper.com";
     private final String userAgent;
     private String acceptEncoding = "gzip, deflate";
@@ -63,33 +64,52 @@ public class Downloader
         return this;
     }
 
-    public InputStream fetch( HttpURLConnection conn ) throws IOException
+    /**
+     * This method initiates a connect call of the provided connection and returns the response
+     * stream. It only returns the error stream if it is available and readErrorStreamNoException is
+     * true otherwise it throws an IOException if an error happens. Furthermore it wraps the stream
+     * to decompress it if the connection content encoding is specified.
+     */
+    public InputStream fetch( HttpURLConnection connection, boolean readErrorStreamNoException ) throws IOException
     {
-        // create connection but before reading get the correct inputstream based on the compression
-        conn.connect();
-        String encoding = conn.getContentEncoding();
+        // create connection but before reading get the correct inputstream based on the compression and if error
+        connection.connect();
+
         InputStream is;
-        if (encoding != null && encoding.equalsIgnoreCase("gzip"))
-            is = new GZIPInputStream(conn.getInputStream());
-        else if (encoding != null && encoding.equalsIgnoreCase("deflate"))
-            is = new InflaterInputStream(conn.getInputStream(), new Inflater(true));
+        if (readErrorStreamNoException && connection.getResponseCode() >= 400 && connection.getErrorStream() != null)
+            is = connection.getErrorStream();
         else
-            is = conn.getInputStream();
+            is = connection.getInputStream();
+
+        if (is == null)
+            throw new IOException("Stream is null. Message:" + connection.getResponseMessage());
+
+        // wrap
+        try
+        {
+            String encoding = connection.getContentEncoding();
+            if (encoding != null && encoding.equalsIgnoreCase("gzip"))
+                is = new GZIPInputStream(is);
+            else if (encoding != null && encoding.equalsIgnoreCase("deflate"))
+                is = new InflaterInputStream(is, new Inflater(true));
+        } catch (IOException ex)
+        {
+        }
 
         return is;
     }
 
     public InputStream fetch( String url ) throws IOException
     {
-        return fetch((HttpURLConnection) createConnection(url));
+        return fetch((HttpURLConnection) createConnection(url), false);
     }
 
     public HttpURLConnection createConnection( String urlStr ) throws IOException
     {
         URL url = new URL(urlStr);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        // conn.setDoInput(true); // Will yield in a POST request
-        conn.setDoOutput(true);
+        // Will yield in a POST request: conn.setDoOutput(true);
+        conn.setDoInput(true);
         conn.setUseCaches(true);
         conn.setRequestProperty("Referrer", referrer);
         conn.setRequestProperty("User-Agent", userAgent);
@@ -104,7 +124,7 @@ public class Downloader
     public void downloadFile( String url, String toFile ) throws IOException
     {
         HttpURLConnection conn = createConnection(url);
-        InputStream iStream = fetch(conn);
+        InputStream iStream = fetch(conn, false);
         int size = 8 * 1024;
         BufferedOutputStream writer = new BufferedOutputStream(new FileOutputStream(toFile), size);
         InputStream in = new BufferedInputStream(iStream, size);
@@ -127,7 +147,7 @@ public class Downloader
     {
         HttpURLConnection conn = createConnection(url);
         final int length = conn.getContentLength();
-        InputStream iStream = fetch(conn);
+        InputStream iStream = fetch(conn, false);
 
         new Unzipper().unzip(iStream, new File(toFolder), new ProgressListener()
         {
@@ -139,8 +159,8 @@ public class Downloader
         });
     }
 
-    public String downloadAsString( String url ) throws IOException
+    public String downloadAsString( String url, boolean readErrorStreamNoException ) throws IOException
     {
-        return Helper.isToString(fetch(url));
+        return Helper.isToString(fetch((HttpURLConnection) createConnection(url), readErrorStreamNoException));
     }
 }

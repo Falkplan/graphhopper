@@ -1,7 +1,7 @@
 ## Routing Web API Docs
 
 In order to communicate with your or [our](http://graphhopper.com/#enterprise) hosted GraphHopper 
-server you need to understand how to use it.
+server you need to understand how to use it. There is a separate [JavaScript](https://github.com/graphhopper/directions-api-js-client) and [Java](https://github.com/graphhopper/directions-api-java-client) client for this API or use the plain JSON response for your language.
 
 ### A simple example
 [http://localhost:8989/route?point=45.752193%2C-0.686646&point=46.229253%2C-0.32959](http://localhost:8989/route?point=45.752193%2C-0.686646&point=46.229253%2C-0.32959)
@@ -14,7 +14,7 @@ All official parameters are shown in the following table
 
 Parameter   | Default | Description
 :-----------|:--------|:-----------
-point       | -       | Specifiy multiple points for which the route should be calculated. The order is important. Specify at least two points.
+point       | -       | Specify multiple points for which the route should be calculated. The order is important. Specify at least two points.
 locale      | en      | The locale of the result. E.g. `pt_PT` for Portuguese or `de` for German
 instructions| true    | If instruction should be calculated and returned
 vehicle     | car     | The vehicle for which the route should be calculated. Other vehicles are foot and bike
@@ -25,10 +25,37 @@ points_encoded     | true    | If `false` a GeoJson array in `point` is returned
 debug              | false   | If true, the output will be formated.
 calc_points        | true    | If the points for the route should be calculated at all. Sometimes only the distance and time is necessary.
 type               | json    | Specifies the resulting format of the route, for json the content type will be application/json. Other possible format options: <br> jsonp you'll need to provide the callback function via the callback parameter. The content type will be application/javascript<br> gpx, the content type will be application/xml
+heading            | NaN     | Favored heading direction for points. Specify either one heading for the start point or as many as there are points. In this case headings are associated by their order to the specific points. Headings are given as north based clockwise angle between 0 and 360 degree, NaN indicates non specific heading. Does only give valid results in the flexibility mode.
+heading_penalty    | 120     | Penalty for omitting a specified heading. The penalty corresponds to the accepted time delay in seconds in comparison to the route without a heading.
+pass_through       | false   | If `true` u-turns are avoided at via-points with regard to the heading_penalty. Does only give valid results in the flexibility mode.
+gpx.track       | true   | Include `<trk>` tag in gpx result. Only applicable if `type=gpx` is specified.
+gpx.route       | true   | Include `<rte>` tag in gpx result. Only applicable if `type=gpx` is specified.
+gpx.waypoints   | false  | Include `<wpt>` tag in gpx result. Only applicable if `type=gpx` is specified.
 
 ## Example output for the case type=json
 
-Keep in mind that some attributes which are not documented here can be removed in the future - you should not rely on them!
+Keep in mind that some attributes which are not documented here can be removed in the future - 
+you should not rely on them! The JSON result contains the following structure:
+
+JSON path/attribute        | Description
+:--------------------------|:------------
+info.took                  | How many ms the request took on the server, of course without network latency taken into account.
+paths                      | An array of possible paths
+paths[0].distance          | The overall distance of the route, in meter
+paths[0].time              | The overall time of the route, in ms
+paths[0].points            | The polyline encoded coordinates of the path. Order is lat,lon,elelevation as it is no geoJson!
+paths[0].points_encoded    | Is true if the points are encoded, if not paths[0].points contains the geo json of the path (then order is lon,lat,elevation), which is easier to handle but consumes more bandwidth compared to encoded version
+paths[0].bbox              | The bounding box of the route, format: <br> minLon, minLat, maxLon, maxLat
+paths[0].instructions      | Contains information about the instructions for this route. The last instruction is always the Finish instruction and takes 0ms and 0meter. Keep in mind that instructions are currently under active development and can sometimes contain misleading information, so, make sure you always show an image of the map at the same time when navigating your users!
+paths[0].instructions[0].text                 | A description what the user has to do in order to follow the route. The language depends on the locale parameter.
+paths[0].instructions[0].distance             | The distance for this instruction, in meter
+paths[0].instructions[0].time                 | The duration for this instruction, in ms
+paths[0].instructions[0].interval             | An array containing the first and the last index (relative to paths[0].points) of the points for this instruction. This is useful to know for which part of the route the instructions are valid.
+paths[0].instructions[0].sign                 | A number which specifies the sign to show e.g. for right turn etc <br>TURN_SHARP_LEFT = -3<br>TURN_LEFT = -2<br>TURN_SLIGHT_LEFT = -1<br>CONTINUE_ON_STREET = 0<br>TURN_SLIGHT_RIGHT = 1<br>TURN_RIGHT = 2<br>TURN_SHARP_RIGHT = 3<br>FINISH = 4<br>VIA_REACHED = 5<br>USE_ROUNDABOUT = 6
+paths[0].instructions[0].annotation_text      | [optional] A text describing the instruction in more detail, e.g. like surface of the way, warnings or involved costs
+paths[0].instructions[0].annotation_importance| [optional] 0 stands for INFO, 1 for warning, 2 for costs, 3 for costs and warning
+paths[0].instructions[0].exit_number          | [optional] Only available for USE_ROUNDABOUT instructions. The count of exits at which the route leaves the roundabout.
+paths[0].instructions[0].turn_angle           | [optional] Only available for USE_ROUNDABOUT instructions. The radian of the route within the roundabout: 0<r<2*PI for clockwise and -2PI<r<0 for counterclockwise transit. Null if the direction of rotation is undefined.
 
 ```json
 {
@@ -100,30 +127,9 @@ Keep in mind that some attributes which are not documented here can be removed i
 }
 ```
 
-The JSON result contains the following structure:
-
-JSON path/attribute        | Description
-:--------------------------|:------------
-info.took                  | How many ms the request took on the server, of course without network latency taken into account.
-paths                      | An array of possible paths
-paths[0].distance          | The overall distance of the route, in meter
-paths[0].time              | The overall time of the route, in ms
-paths[0].points            | The polyline encoded coordinates of the path. Order is lat,lon,elelevation as it is no geoJson!
-paths[0].points_encoded    | Is true if the points are encoded, if not paths[0].points contains the geo json of the path (then order is lon,lat,elevation), which is easier to handle but consumes more bandwidth compared to encoded version
-paths[0].bbox              | The bounding box of the route, format: <br> minLon, minLat, maxLon, maxLat
-paths[0].instructions      | Contains information about the instructions for this route. The last instruction is always the Finish instruction and takes 0ms and 0meter. Keep in mind that instructions are currently under active development and can sometimes contain misleading information, so, make sure you always show an image of the map at the same time when navigating your users!
-paths[0].instructions[0].text                 | A description what the user has to do in order to follow the route. The language depends on the locale parameter.
-paths[0].instructions[0].distance             | The distance for this instruction, in meter
-paths[0].instructions[0].time                 | The duration for this instruction, in ms
-paths[0].instructions[0].interval             | An array containing the first and the last index (relative to paths[0].points) of the points for this instruction. This is useful to know for which part of the route the instructions are valid.
-paths[0].instructions[0].sign                 | A number which specifies the sign to show e.g. for right turn etc <br>TURN_SHARP_LEFT = -3<br>TURN_LEFT = -2<br>TURN_SLIGHT_LEFT = -1<br>CONTINUE_ON_STREET = 0<br>TURN_SLIGHT_RIGHT = 1<br>TURN_RIGHT = 2<br>TURN_SHARP_RIGHT = 3<br>FINISH = 4<br>VIA_REACHED = 5
-paths[0].instructions[0].annotationText       | [optional] A text describing the instruction in more detail, e.g. like surface of the way, warnings or involved costs
-paths[0].instructions[0].annotationImportance | [optional] 0 stands for INFO, 1 for warning, 2 for costs, 3 for costs and warning
-
-
 ## Area information
 
-If you need to find out defails about the area or need to ping the service use '/info'
+If you need to find out details about the area or need to ping the service use '/info'
 
 [http://localhost:8989/info](http://localhost:8989/info)
 
@@ -147,13 +153,11 @@ import_date         | [optional] The date time at which the OSM import was done
 prepare_date        | [optional] The date time at which the preparation (contraction hierarchies) was done. If nothing was done this is empty
 supported_vehicles  | [deprecated] An array of strings for all supported vehicles
 
-### Output if expected error(s) while routing:
+### Error Output
 ```json
 {
-  "info": {"errors": [{
-    "details": "java.lang.IllegalArgumentException",
-    "message": "Cannot find point 2: 2248.224673, 3.867187"
-  }]}
+  "message": "Cannot find point 2: 2248.224673, 3.867187",
+  "hints": [{"message": "something", ...}]
 }
 ```
 
@@ -162,15 +166,14 @@ indicate a bug in the routing engine and is expected to a certain degree if too 
 
 JSON path/attribute    | Description
 :----------------------|:------------
-info.errors            | A list of error messages
-info.errors[0].details | E.g. to see the underlying exception, if any
-info.errors[0].message | Not intended to be displayed to the user as it is currently not translated
+message                | Not intended to be displayed to the user as it is not translated
+hints                  | An optional list of details regarding the error message e.g. `[{"message": "first error message in hints"}]`
 
 
 ### HTTP Error codes
 
 HTTP error code | Reason
 :---------------|:------------
-500             | Internal server error. It is strongely recommended to send us the message and the link to it, as it is very likely a bug in our system.
+500             | Internal server error. It is strongly recommended to send us the message and the link to it, as it is very likely a bug in our system.
 501             | Only a special list of vehicles is supported
 400             | Something was wrong in your request

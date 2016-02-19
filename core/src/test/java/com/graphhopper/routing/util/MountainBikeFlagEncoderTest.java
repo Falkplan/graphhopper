@@ -17,11 +17,14 @@
  */
 package com.graphhopper.routing.util;
 
+import com.graphhopper.reader.OSMNode;
 import com.graphhopper.reader.OSMRelation;
 import com.graphhopper.reader.OSMWay;
-import com.graphhopper.routing.util.PriorityCode;
+
 import static com.graphhopper.routing.util.PriorityCode.*;
+
 import org.junit.Test;
+
 import static org.junit.Assert.*;
 
 public class MountainBikeFlagEncoderTest extends AbstractBikeFlagEncoderTester
@@ -89,12 +92,15 @@ public class MountainBikeFlagEncoderTest extends AbstractBikeFlagEncoderTester
         OSMWay way = new OSMWay(1);
         way.setTag("highway", "service");
         way.setTag("sac_scale", "hiking");
-        // allow
+        assertTrue(encoder.acceptWay(way) > 0);
+
+        way.setTag("highway", "service");
+        way.setTag("sac_scale", "mountain_hiking");
         assertTrue(encoder.acceptWay(way) > 0);
 
         way.setTag("sac_scale", "alpine_hiking");
         assertTrue(encoder.acceptWay(way) > 0);
-        
+
         way.setTag("sac_scale", "demanding_alpine_hiking");
         assertTrue(encoder.acceptWay(way) == 0);
     }
@@ -199,4 +205,30 @@ public class MountainBikeFlagEncoderTest extends AbstractBikeFlagEncoderTester
         assertPriority(PriorityCode.PREFER.getValue(), osmWay);
         assertEquals("", getWayTypeFromFlags(osmWay));
     }
+
+    // Issue 407 : Always block kissing_gate execpt for mountainbikes
+    @Test
+    public void testBarrierAccess()
+    {
+        // kissing_gate without bicycle tag
+        OSMNode node = new OSMNode(1, -1, -1);
+        node.setTag("barrier", "kissing_gate");
+        // No barrier!
+        assertTrue(encoder.handleNodeTags(node) == 0);
+
+        // kissing_gate with bicycle tag = no
+        node = new OSMNode(1, -1, -1);
+        node.setTag("barrier", "kissing_gate");
+        node.setTag("bicycle", "no");
+        // barrier!
+        assertFalse(encoder.handleNodeTags(node) == 0);
+
+        // kissing_gate with bicycle tag
+        node = new OSMNode(1, -1, -1);
+        node.setTag("barrier", "kissing_gate");
+        node.setTag("bicycle", "yes");
+        // No barrier!
+        assertTrue(encoder.handleNodeTags(node) == 0);
+    }
+
 }

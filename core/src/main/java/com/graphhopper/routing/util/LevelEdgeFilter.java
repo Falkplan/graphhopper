@@ -17,32 +17,37 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.storage.LevelGraph;
+import com.graphhopper.storage.CHGraph;
 import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.CHEdgeIteratorState;
 
 /**
  * Only certain nodes are accepted and therefor the others are ignored.
- * <p/>
+ * <p>
  * @author Peter Karich
  */
 public class LevelEdgeFilter implements EdgeFilter
 {
-    private final LevelGraph graph;
-    private final int nodes;
+    private final CHGraph graph;
+    private final int maxNodes;
 
-    public LevelEdgeFilter( LevelGraph g )
+    public LevelEdgeFilter( CHGraph g )
     {
         graph = g;
-        nodes = g.getNodes();
+        maxNodes = g.getNodes();
     }
 
     @Override
-    public boolean accept( EdgeIteratorState edgeIter )
+    public boolean accept( EdgeIteratorState edgeIterState )
     {
-        int base = edgeIter.getBaseNode();
-        int adj = edgeIter.getAdjNode();
-        // for now workaround for #288
-        if (base >= nodes || adj >= nodes)
+        int base = edgeIterState.getBaseNode();
+        int adj = edgeIterState.getAdjNode();
+        // always accept virtual edges, see #288
+        if (base >= maxNodes || adj >= maxNodes)
+            return true;
+
+        // minor performance improvement: shortcuts in wrong direction are disconnected, so no need to exclude them
+        if (((CHEdgeIteratorState) edgeIterState).isShortcut())
             return true;
 
         return graph.getLevel(base) <= graph.getLevel(adj);

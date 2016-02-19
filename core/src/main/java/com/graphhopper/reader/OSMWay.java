@@ -23,11 +23,10 @@ import gnu.trove.list.array.TLongArrayList;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
-import java.util.Map;
 
 /**
  * Represents an OSM Way
- * <p/>
+ * <p>
  * @author Nop
  */
 public class OSMWay extends OSMElement
@@ -75,6 +74,6 @@ public class OSMWay extends OSMElement
     @Override
     public String toString()
     {
-        return "Way (" + getId() + ", " + nodes.size() + " nodes)";
+        return "Way id:" + getId() + ", nodes:" + nodes.size() + ", tags:" + super.toString();
     }
 }

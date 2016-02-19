@@ -1,6 +1,6 @@
 GraphHopper licensed under the Apache license, Version 2.0
 
-Copyright 2012-2013 Peter Karich
+Copyright 2012-2016 Peter Karich
 
 The core product includes the following software
  * slf4j.org - SLF4J distributed under the MIT license. 
@@ -10,9 +10,13 @@ The core product includes the following software
  * protobuf - New BSD license
  * OSM-binary - LGPL license
  * Osmosis - public domain, see osmosis-copying.txt under core/files
+ * XMLGraphics-Commons for CGIAR elevation files - (Apache License)
 
 tools
  * apache-compress
+
+tools-lgpl
+ * tools from OpenTripPlanner licensed under LGPL
 
 web
  * org.json, MIT style license

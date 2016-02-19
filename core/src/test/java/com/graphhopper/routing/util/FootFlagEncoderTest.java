@@ -23,12 +23,16 @@ import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.GraphBuilder;
 import com.graphhopper.util.EdgeExplorer;
 import com.graphhopper.util.GHUtility;
+import com.graphhopper.util.Helper;
+import java.text.DateFormat;
 
 import org.junit.Test;
+
+import java.util.Date;
+
 import static org.junit.Assert.*;
 
 /**
- *
  * @author Peter Karich
  */
 public class FootFlagEncoderTest
@@ -60,12 +64,12 @@ public class FootFlagEncoderTest
         FlagEncoder carEncoder = encodingManager.getEncoder("CAR");
         long fl = footEncoder.setProperties(10, true, true) | carEncoder.setProperties(100, true, false);
         assertEquals(10, footEncoder.getSpeed(fl), 1e-1);
-        assertTrue(footEncoder.isBool(fl, FlagEncoder.K_FORWARD));
-        assertTrue(footEncoder.isBool(fl, FlagEncoder.K_BACKWARD));
+        assertTrue(footEncoder.isForward(fl));
+        assertTrue(footEncoder.isBackward(fl));
 
         assertEquals(100, carEncoder.getSpeed(fl), 1e-1);
-        assertTrue(carEncoder.isBool(fl, FlagEncoder.K_FORWARD));
-        assertFalse(carEncoder.isBool(fl, FlagEncoder.K_BACKWARD));
+        assertTrue(carEncoder.isForward(fl));
+        assertFalse(carEncoder.isBackward(fl));
 
         assertEquals(0, carEncoder.getSpeed(footEncoder.setProperties(10, true, true)), 1e-1);
     }
@@ -133,6 +137,16 @@ public class FootFlagEncoderTest
         assertTrue(footEncoder.acceptWay(way) > 0);
         way.setTag("foot", "no");
         assertFalse(footEncoder.acceptWay(way) > 0);
+        way.setTag("access", "yes");
+        assertFalse(footEncoder.acceptWay(way) > 0);
+
+        way.clearTags();
+        way.setTag("highway", "service");
+        way.setTag("foot", "yes");
+        way.setTag("access", "no");
+        assertTrue(footEncoder.acceptWay(way) > 0);
+        way.setTag("foot", "no");
+        assertFalse(footEncoder.acceptWay(way) > 0);
 
         way.clearTags();
         way.setTag("highway", "track");
@@ -146,6 +160,40 @@ public class FootFlagEncoderTest
         assertTrue(footEncoder.acceptWay(way) > 0);
         way.setTag("foot", "no");
         assertFalse(footEncoder.acceptWay(way) > 0);
+
+        DateFormat simpleDateFormat = Helper.createFormatter("yyyy MMM dd");
+
+        way.clearTags();
+        way.setTag("highway", "footway");
+        way.setTag("access:conditional", "no @ (" + simpleDateFormat.format(new Date().getTime()) + ")");
+        assertFalse(footEncoder.acceptWay(way) > 0);
+
+        way.clearTags();
+        way.setTag("highway", "footway");
+        way.setTag("access", "no");
+        way.setTag("access:conditional", "yes @ (" + simpleDateFormat.format(new Date().getTime()) + ")");
+        assertTrue(footEncoder.acceptWay(way) > 0);
+    }
+
+    @Test
+    public void testRailPlatformIssue366()
+    {
+        OSMWay way = new OSMWay(1);
+        way.setTag("railway", "platform");
+        long flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
+        assertNotEquals(0, flags);
+
+        way.clearTags();
+        way.setTag("highway", "track");
+        way.setTag("railway", "platform");
+        flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
+        assertNotEquals(0, flags);
+
+        way.clearTags();
+        // only tram, no highway => no access
+        way.setTag("railway", "tram");
+        flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
+        assertEquals(0, flags);
     }
 
     @Test
@@ -171,11 +219,44 @@ public class FootFlagEncoderTest
     {
         OSMWay way = new OSMWay(1);
         way.setTag("highway", "cycleway");
+        assertEquals(PriorityCode.UNCHANGED.getValue(), footEncoder.handlePriority(way, 0));
+
+        way.setTag("highway", "primary");
         assertEquals(PriorityCode.REACH_DEST.getValue(), footEncoder.handlePriority(way, 0));
 
         way.setTag("highway", "track");
         way.setTag("bicycle", "official");
+        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, 0));
+
+        way.setTag("highway", "track");
+        way.setTag("bicycle", "designated");
+        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, 0));
+
+        way.setTag("highway", "cycleway");
+        way.setTag("bicycle", "designated");
+        way.setTag("foot", "designated");
+        assertEquals(PriorityCode.PREFER.getValue(), footEncoder.handlePriority(way, 0));
+
+        way.clearTags();
+        way.setTag("highway", "primary");
+        way.setTag("sidewalk", "yes");
         assertEquals(PriorityCode.REACH_DEST.getValue(), footEncoder.handlePriority(way, 0));
+
+        way.clearTags();
+        way.setTag("highway", "cycleway");
+        way.setTag("sidewalk", "no");
+        assertEquals(PriorityCode.UNCHANGED.getValue(), footEncoder.handlePriority(way, 0));
+
+        way.clearTags();
+        way.setTag("highway", "road");
+        way.setTag("bicycle", "official");
+        way.setTag("sidewalk", "no");
+        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, 0));
+
+        way.clearTags();
+        way.setTag("highway", "residential");
+        way.setTag("sidewalk", "yes");
+        assertEquals(PriorityCode.PREFER.getValue(), footEncoder.handlePriority(way, 0));
     }
 
     @Test
@@ -250,5 +331,42 @@ public class FootFlagEncoderTest
         node.setTag("locked", "yes");
         // barrier!
         assertTrue(footEncoder.handleNodeTags(node) > 0);
+    }
+
+    @Test
+    public void handleWayTagsRoundabout()
+    {
+        OSMWay way = new OSMWay(1);
+        way.setTag("junction", "roundabout");
+        way.setTag("highway", "tertiary");
+        long flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
+        assertTrue(footEncoder.isBool(flags, FlagEncoder.K_ROUNDABOUT));
+    }
+
+    public void testFord()
+    {
+        // by default deny access through fords!
+        OSMNode node = new OSMNode(1, -1, -1);
+        node.setTag("ford", "no");
+        assertTrue(footEncoder.handleNodeTags(node) == 0);
+
+        node = new OSMNode(1, -1, -1);
+        node.setTag("ford", "yes");
+        assertTrue(footEncoder.handleNodeTags(node) > 0);
+
+        node.setTag("foot", "yes");
+        // no barrier!
+        assertTrue(footEncoder.handleNodeTags(node) == 0);
+
+        // Now let's allow fords for foot
+        footEncoder.setBlockFords(Boolean.FALSE);
+
+        node = new OSMNode(1, -1, -1);
+        node.setTag("ford", "no");
+        assertTrue(footEncoder.handleNodeTags(node) == 0);
+
+        node = new OSMNode(1, -1, -1);
+        node.setTag("ford", "yes");
+        assertTrue(footEncoder.handleNodeTags(node) == 0);
     }
 }

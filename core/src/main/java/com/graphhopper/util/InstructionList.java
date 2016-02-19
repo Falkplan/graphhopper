@@ -17,8 +17,7 @@
  */
 package com.graphhopper.util;
 
-import java.text.SimpleDateFormat;
-
+import java.text.DateFormat;
 import java.util.*;
 
 /**
@@ -46,6 +45,14 @@ public class InstructionList implements Iterable<Instruction>
         this.tr = tr;
     }
 
+    public void replaceLast( Instruction instr )
+    {
+        if (instructions.isEmpty())
+            throw new IllegalStateException("Cannot replace last instruction as list is empty");
+
+        instructions.set(instructions.size() - 1, instr);
+    }
+
     public void add( Instruction instr )
     {
         instructions.add(instr);
@@ -59,47 +66,6 @@ public class InstructionList implements Iterable<Instruction>
     public int size()
     {
         return instructions.size();
-    }
-
-    /**
-     * Returns the descriptions of the distance per instruction.
-     */
-    public List<String> createDistances( boolean mile )
-    {
-        List<String> labels = new ArrayList<String>(instructions.size());
-        for (int i = 0; i < instructions.size(); i++)
-        {
-            double distInMeter = instructions.get(i).getDistance();
-            if (mile)
-            {
-                // calculate miles
-                double distInMiles = distInMeter / 1000 / DistanceCalcEarth.KM_MILE;
-                if (distInMiles < 0.9)
-                {
-                    labels.add((int) Helper.round(distInMiles * 5280, 1) + " " + tr.tr("ftAbbr"));
-                } else
-                {
-                    if (distInMiles < 100)
-                        labels.add(Helper.round(distInMiles, 2) + " " + tr.tr("miAbbr"));
-                    else
-                        labels.add((int) Helper.round(distInMiles, 1) + " " + tr.tr("miAbbr"));
-                }
-            } else
-            {
-                if (distInMeter < 950)
-                {
-                    labels.add((int) Helper.round(distInMeter, 1) + " " + tr.tr("mAbbr"));
-                } else
-                {
-                    distInMeter /= 1000;
-                    if (distInMeter < 100)
-                        labels.add(Helper.round(distInMeter, 2) + " " + tr.tr("kmAbbr"));
-                    else
-                        labels.add((int) Helper.round(distInMeter, 1) + " " + tr.tr("kmAbbr"));
-                }
-            }
-        }
-        return labels;
     }
 
     public List<Map<String, Object>> createJson()
@@ -119,14 +85,15 @@ public class InstructionList implements Iterable<Instruction>
             instrJson.put("text", Helper.firstBig(str));
             if (!ia.isEmpty())
             {
-                instrJson.put("annotationText", ia.getMessage());
-                instrJson.put("annotationImportance", ia.getImportance());
+                instrJson.put("annotation_text", ia.getMessage());
+                instrJson.put("annotation_importance", ia.getImportance());
             }
 
             instrJson.put("time", instruction.getTime());
             instrJson.put("distance", Helper.round(instruction.getDistance(), 3));
             instrJson.put("sign", instruction.getSign());
             instrJson.put("name", instruction.getName());
+            instrJson.putAll(instruction.getExtraInfoJSON());
 
             int tmpIndex = pointsIndex + instruction.getPoints().size();
             // the last instruction should not point to the next instruction
@@ -196,105 +163,134 @@ public class InstructionList implements Iterable<Instruction>
     /**
      * Creates the standard GPX string out of the points according to the schema found here:
      * https://graphhopper.com/public/schema/gpx-1.1.xsd
-     * <p/>
+     * <p>
      * @return string to be stored as gpx file
      */
     public String createGPX()
     {
-        return createGPX("GraphHopper", 0, "GMT");
+        return createGPX("GraphHopper", new Date().getTime());
     }
 
-    public String createGPX( String trackName, long startTimeMillis, String timeZoneId )
+    public String createGPX( String trackName, long startTimeMillis )
     {
         boolean includeElevation = getSize() > 0 ? get(0).getPoints().is3D() : false;
-        return createGPX(trackName, startTimeMillis, timeZoneId, includeElevation);
+        return createGPX(trackName, startTimeMillis, includeElevation, true, true, true);
     }
 
-    public String createGPX( String trackName, long startTimeMillis, String timeZoneId, boolean includeElevation )
+    private void createWayPointBlock( StringBuilder output, Instruction instruction )
     {
-        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ");
-        TimeZone tz = TimeZone.getDefault();
-        if (!Helper.isEmpty(timeZoneId))
-            tz = TimeZone.getTimeZone(timeZoneId);
+        output.append("\n<wpt ");
+        output.append("lat=\"").append(Helper.round6(instruction.getFirstLat()));
+        output.append("\" lon=\"").append(Helper.round6(instruction.getFirstLon())).append("\">");
+        String name;
+        if (instruction.getName().isEmpty())
+            name = instruction.getTurnDescription(tr);
+        else
+            name = instruction.getName();
 
-        formatter.setTimeZone(tz);
-        String header = "<?xml version='1.0' encoding='UTF-8' standalone='no' ?>"
-                + "<gpx xmlns='http://www.topografix.com/GPX/1/1' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'"
-                + " creator='Graphhopper' version='1.1'"
+        output.append(" <name>").append(simpleXMLEscape(name)).append("</name>");
+        output.append("</wpt>");
+    }
+
+    static String simpleXMLEscape( String str )
+    {
+        // We could even use the 'more flexible' CDATA section but for now do the following. The 'and' could be important sometimes:
+        return str.replaceAll("&", "&amp;").
+                // but do not care for:
+                replaceAll("[\\<\\>]", "_");
+    }
+
+    public String createGPX( String trackName, long startTimeMillis, boolean includeElevation, boolean withRoute, boolean withTrack, boolean withWayPoints )
+    {
+        DateFormat formatter = Helper.createFormatter();
+
+        String header = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>"
+                + "<gpx xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
+                + " creator=\"Graphhopper version " + Constants.VERSION + "\" version=\"1.1\""
                 // This xmlns:gh acts only as ID, no valid URL necessary.
                 // Use a separate namespace for custom extensions to make basecamp happy.
-                + " xmlns:gh='https://graphhopper.com/public/schema/gpx/1.1'>"
+                + " xmlns:gh=\"https://graphhopper.com/public/schema/gpx/1.1\">"
                 + "\n<metadata>"
                 + "<copyright author=\"OpenStreetMap contributors\"/>"
-                + "<link href='http://graphhopper.com'>"
+                + "<link href=\"http://graphhopper.com\">"
                 + "<text>GraphHopper GPX</text>"
                 + "</link>"
-                + "<time>" + tzHack(formatter.format(startTimeMillis)) + "</time>"
+                + "<time>" + formatter.format(startTimeMillis) + "</time>"
                 + "</metadata>";
-        StringBuilder track = new StringBuilder(header);
+        StringBuilder gpxOutput = new StringBuilder(header);
         if (!isEmpty())
         {
-            track.append("\n<rte>");
-            Instruction nextI = null;
-            for (Instruction instr : instructions)
+            if (withWayPoints)
             {
-                if (null != nextI)
-                    createRteptBlock(track, nextI, instr);
-
-                nextI = instr;
+                createWayPointBlock(gpxOutput, instructions.get(0));   // Start 
+                for (Instruction currInstr : instructions)
+                {
+                    if ((currInstr.getSign() == Instruction.REACHED_VIA) || // Via 
+                            (currInstr.getSign() == Instruction.FINISH))    // End
+                    {
+                        createWayPointBlock(gpxOutput, currInstr);
+                    }
+                }
             }
-            createRteptBlock(track, nextI, null);
-            track.append("</rte>");
+            if (withRoute)
+            {
+                gpxOutput.append("\n<rte>");
+                Instruction nextInstr = null;
+                for (Instruction currInstr : instructions)
+                {
+                    if (null != nextInstr)
+                        createRteptBlock(gpxOutput, nextInstr, currInstr);
+
+                    nextInstr = currInstr;
+                }
+                createRteptBlock(gpxOutput, nextInstr, null);
+                gpxOutput.append("\n</rte>");
+            }
         }
-
-        track.append("\n<trk><name>").append(trackName).append("</name>");
-
-        track.append("<trkseg>");
-        for (GPXEntry entry : createGPXList())
+        if (withTrack)
         {
-            track.append("\n<trkpt lat='").append(Helper.round6(entry.getLat()));
-            track.append("' lon='").append(Helper.round6(entry.getLon())).append("'>");
-            if (includeElevation)
-                track.append("<ele>").append(Helper.round2(entry.getEle())).append("</ele>");
-            track.append("<time>").append(tzHack(formatter.format(startTimeMillis + entry.getMillis()))).append("</time>");
-            track.append("</trkpt>");
+            gpxOutput.append("\n<trk><name>").append(trackName).append("</name>");
+
+            gpxOutput.append("<trkseg>");
+            for (GPXEntry entry : createGPXList())
+            {
+                gpxOutput.append("\n<trkpt lat=\"").append(Helper.round6(entry.getLat()));
+                gpxOutput.append("\" lon=\"").append(Helper.round6(entry.getLon())).append("\">");
+                if (includeElevation)
+                    gpxOutput.append("<ele>").append(Helper.round2(entry.getEle())).append("</ele>");
+                gpxOutput.append("<time>").append(formatter.format(startTimeMillis + entry.getTime())).append("</time>");
+                gpxOutput.append("</trkpt>");
+            }
+            gpxOutput.append("\n</trkseg>");
+            gpxOutput.append("\n</trk>");
         }
-        track.append("</trkseg>");
-        track.append("</trk>");
 
         // we could now use 'wpt' for via points
-        track.append("</gpx>");
-        return track.toString().replaceAll("\\'", "\"");
+        gpxOutput.append("\n</gpx>");
+        return gpxOutput.toString();
     }
 
-    /**
-     * Hack to form valid timezone ala +01:00 instead +0100
-     */
-    private static String tzHack( String str )
-    {
-        return str.substring(0, str.length() - 2) + ":" + str.substring(str.length() - 2);
-    }
-
-    private void createRteptBlock( StringBuilder output, Instruction instruction, Instruction nextI )
+    public void createRteptBlock( StringBuilder output, Instruction instruction, Instruction nextI )
     {
         output.append("\n<rtept lat=\"").append(Helper.round6(instruction.getFirstLat())).
                 append("\" lon=\"").append(Helper.round6(instruction.getFirstLon())).append("\">");
 
         if (!instruction.getName().isEmpty())
-            output.append("<desc>").append(instruction.getTurnDescription(tr)).append("</desc>");
+            output.append("<desc>").append(simpleXMLEscape(instruction.getTurnDescription(tr))).append("</desc>");
 
         output.append("<extensions>");
         output.append("<gh:distance>").append(Helper.round(instruction.getDistance(), 1)).append("</gh:distance>");
         output.append("<gh:time>").append(instruction.getTime()).append("</gh:time>");
 
-        String direction = instruction.getDirection(nextI);
+        String direction = instruction.calcDirection(nextI);
         if (!direction.isEmpty())
             output.append("<gh:direction>").append(direction).append("</gh:direction>");
 
-        String azimuth = instruction.getAzimuth(nextI);
-        if (!azimuth.isEmpty())
-            output.append("<gh:azimuth>").append(azimuth).append("</gh:azimuth>");
+        double azimuth = instruction.calcAzimuth(nextI);
+        if (!Double.isNaN(azimuth))
+            output.append("<gh:azimuth>").append(Helper.round2(azimuth)).append("</gh:azimuth>");
 
+        output.append("<gh:sign>").append(instruction.getSign()).append("</gh:sign>");
         output.append("</extensions>");
         output.append("</rtept>");
     }
@@ -357,6 +353,8 @@ public class InstructionList implements Iterable<Instruction>
                         } else
                         {
                             distance = distCalc.calcNormalizedDist(lat, lon, currLat, currLon);
+                            if (pointIndex > 0)
+                                index++;
                         }
 
                         if (distance < foundMinDistance)
@@ -365,7 +363,6 @@ public class InstructionList implements Iterable<Instruction>
                             foundInstruction = index;
                         }
                     }
-
                     prevLat = currLat;
                     prevLon = currLon;
                 }

@@ -89,7 +89,7 @@ public class TurnWeighting implements Weighting
 
     public double calcTurnWeight( int edgeFrom, int nodeVia, int edgeTo )
     {
-        long turnFlags = turnCostExt.getTurnCostFlags(nodeVia, edgeFrom, edgeTo);
+        long turnFlags = turnCostExt.getTurnCostFlags(edgeFrom, nodeVia, edgeTo);
         if (turnCostEncoder.isTurnRestricted(turnFlags))
             return Double.POSITIVE_INFINITY;
 
@@ -97,8 +97,21 @@ public class TurnWeighting implements Weighting
     }
 
     @Override
-    public String toString()
+    public FlagEncoder getFlagEncoder()
     {
-        return "TURN|" + superWeighting.toString();
+        return superWeighting.getFlagEncoder();
+    }
+
+    @Override
+    public boolean matches( String weightingAsStr, FlagEncoder encoder )
+    {
+        // TODO without 'turn' in comparison
+        return superWeighting.matches(weightingAsStr, encoder);
+    }
+
+    @Override
+    public String getName()
+    {
+        return "turn|" + superWeighting.getName();
     }
 }

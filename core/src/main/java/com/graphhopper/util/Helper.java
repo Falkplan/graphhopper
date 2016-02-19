@@ -20,6 +20,7 @@ package com.graphhopper.util;
 import com.graphhopper.util.shapes.BBox;
 import gnu.trove.list.TIntList;
 import gnu.trove.list.array.TIntArrayList;
+
 import java.io.*;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
@@ -28,17 +29,20 @@ import java.nio.charset.Charset;
 import java.security.AccessController;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
+import java.text.DateFormat;
 import java.text.NumberFormat;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.Map.Entry;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Several utility classes which are compatible with Java6 on Android.
- * <p/>
- * @see Helper7 for none-Android compatible methods.
+ * <p>
  * @author Peter Karich
+ * @see Helper7 for none-Android compatible methods.
  */
 public class Helper
 {
@@ -47,6 +51,7 @@ public class Helper
     public static final DistancePlaneProjection DIST_PLANE = new DistancePlaneProjection();
     private static final Logger logger = LoggerFactory.getLogger(Helper.class);
     public static Charset UTF_CS = Charset.forName("UTF-8");
+    public static final TimeZone UTC = TimeZone.getTimeZone("UTC");
     public static final long MB = 1L << 20;
 
     public static ArrayList<Integer> tIntListToArrayList( TIntList from )
@@ -62,6 +67,10 @@ public class Helper
 
     public static Locale getLocale( String param )
     {
+        int pointIndex = param.indexOf('.');
+        if (pointIndex > 0)
+            param = param.substring(0, pointIndex);
+
         param = param.replace("-", "_");
         int index = param.indexOf("_");
         if (index < 0)
@@ -116,7 +125,7 @@ public class Helper
 
                 String field = line.substring(0, index);
                 String value = line.substring(index + 1);
-                map.put(field, value);
+                map.put(field.trim(), value.trim());
             }
         } finally
         {
@@ -351,25 +360,29 @@ public class Helper
      * Converts into an integer to be compatible with the still limited DataAccess class (accepts
      * only integer values). But this conversion also reduces memory consumption where the precision
      * loss is accceptable. As +- 180° and +-90° are assumed as maximum values.
-     * <p/>
+     * <p>
      * @return the integer of the specified degree
      */
     public static final int degreeToInt( double deg )
     {
         if (deg >= Double.MAX_VALUE)
             return Integer.MAX_VALUE;
+        if (deg <= -Double.MAX_VALUE)
+            return -Integer.MAX_VALUE;
         return (int) (deg * DEGREE_FACTOR);
     }
 
     /**
      * Converts back the integer value.
-     * <p/>
+     * <p>
      * @return the degree value of the specified integer
      */
     public static final double intToDegree( int storedInt )
     {
         if (storedInt == Integer.MAX_VALUE)
             return Double.MAX_VALUE;
+        if (storedInt == -Integer.MAX_VALUE)
+            return -Double.MAX_VALUE;
         return (double) storedInt / DEGREE_FACTOR;
     }
 
@@ -484,6 +497,42 @@ public class Helper
 
     public static final double round2( double value )
     {
-        return Math.round(value * 100) / 100;
+        return Math.round(value * 100) / 100d;
+    }    
+
+    /**
+     * This creates a date formatter for yyyy-MM-dd'T'HH:mm:ss'Z' which is has to be identical to
+     * buildDate used in pom.xml
+     */
+    public static DateFormat createFormatter()
+    {
+        return createFormatter("yyyy-MM-dd'T'HH:mm:ss'Z'");
+    }
+
+    /**
+     * Creates a SimpleDateFormat with the UK locale.
+     */
+    public static DateFormat createFormatter( String str )
+    {
+        DateFormat df = new SimpleDateFormat(str, Locale.UK);
+        df.setTimeZone(UTC);
+        return df;
+    }
+
+    /**
+     * This method handles the specified (potentially negative) int as unsigned bit representation
+     * and returns the positive converted long.
+     */
+    public static final long toUnsignedLong( int x )
+    {
+        return ((long) x) & 0xFFFFffffL;
+    }
+
+    /**
+     * Converts the specified long back into a signed int (reverse method for toUnsignedLong)
+     */
+    public static final int toSignedInt( long x )
+    {
+        return (int) x;
     }
 }

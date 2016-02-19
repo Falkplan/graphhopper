@@ -21,7 +21,7 @@ package com.graphhopper.storage;
  * If you need custom storages, like turn cost tables, or osmid tables for your graph you implement
  * this interface and put it in any graph storage you want.
  */
-public interface GraphExtension
+public interface GraphExtension extends Storable<GraphExtension>
 {
     /**
      * @return true, if and only if, if an additional field at the graphs node storage is required
@@ -44,39 +44,14 @@ public interface GraphExtension
     int getDefaultEdgeFieldValue();
 
     /**
-     * initializes the extended storage by giving the graph storage
+     * initializes the extended storage by giving the base graph
      */
-    void init( GraphStorage graph );
-
-    /**
-     * creates all additional data storages
-     */
-    void create( long initSize );
-
-    /**
-     * loads from existing data storages
-     */
-    boolean loadExisting();
+    void init( Graph graph, Directory dir );
 
     /**
      * sets the segment size in all additional data storages
      */
     void setSegmentSize( int bytes );
-
-    /**
-     * flushes all additional data storages
-     */
-    void flush();
-
-    /**
-     * closes all additional data storages
-     */
-    void close();
-
-    /**
-     * returns the sum of all additional data storages capacity
-     */
-    long getCapacity();
 
     /**
      * creates a copy of this extended storage
@@ -87,7 +62,7 @@ public interface GraphExtension
      * default implementation defines no additional fields or any logic. there's like nothing , like
      * the default behavior.
      */
-    public class NoExtendedStorage implements GraphExtension
+    public class NoOpExtension implements GraphExtension
     {
 
         @Override
@@ -115,15 +90,16 @@ public interface GraphExtension
         }
 
         @Override
-        public void init( GraphStorage grap )
+        public void init( Graph graph, Directory dir )
         {
             // noop
         }
 
         @Override
-        public void create( long initSize )
+        public GraphExtension create( long byteCount )
         {
             // noop
+            return this;
         }
 
         @Override
@@ -168,6 +144,12 @@ public interface GraphExtension
         public String toString()
         {
             return "NoExt";
-        }       
+        }
+
+        @Override
+        public boolean isClosed()
+        {
+            return false;
+        }
     }
 }

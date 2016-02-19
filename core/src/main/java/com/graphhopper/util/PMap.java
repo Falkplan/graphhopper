@@ -44,6 +44,28 @@ public class PMap
         this.map = map;
     }
 
+    public PMap( String propertiesString )
+    {
+        // five chosen as arbitrary initial capacity
+        this.map = new HashMap<String, String>(5);
+
+        for (String s : propertiesString.split("\\|"))
+        {
+            s = s.trim();
+            int index = s.indexOf("=");
+            if (index < 0)
+                continue;
+
+            this.map.put(s.substring(0, index).toLowerCase(), s.substring(index + 1));
+        }
+    }
+
+    public PMap put( PMap map )
+    {
+        this.map.putAll(map.map);
+        return this;
+    }
+
     public PMap put( String key, Object str )
     {
         if (str == null)
@@ -55,7 +77,7 @@ public class PMap
 
     public PMap remove( String key )
     {
-        map.remove(key);
+        map.remove(key.toLowerCase());
         return this;
     }
 
@@ -141,6 +163,14 @@ public class PMap
             return "";
         }
         return val;
+    }
+
+    /**
+     * This method copies the underlying structur into a new Map object
+     */
+    public Map<String, String> toMap()
+    {
+        return new HashMap<String, String>(map);
     }
 
     private Map<String, String> getMap()
