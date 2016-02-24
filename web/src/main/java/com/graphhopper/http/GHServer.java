@@ -87,6 +87,7 @@ public class GHServer
 
         SelectChannelConnector connector0 = new SelectChannelConnector();
         int httpPort = args.getInt("jetty.port", 8989);
+        int httpsPort = args.getInt("jetty.sslPort", 443);
         String host = args.get("jetty.host", "");
         connector0.setPort(httpPort);        
         connector0.setRequestHeaderSize(16192);
@@ -110,7 +111,7 @@ public class GHServer
             sslFactory.setTrustStorePassword(args.get("jetty.truststorePass", ""));
 
             SslSelectChannelConnector connector1 = new SslSelectChannelConnector(sslFactory);
-            connector1.setPort(443);      
+            connector1.setPort(httpsPort);      
             connector1.setRequestHeaderSize(16192);
             if (!host.isEmpty())
                 connector1.setHost(host);
@@ -126,6 +127,8 @@ public class GHServer
         server.setHandler(handlers);
         server.start();
         logger.info("Started server at HTTP " + host + ":" + httpPort);
+        if (args.getBool("jetty.useSsl", false))
+            logger.info("Started server at HTTPS " + host + ":" + httpsPort);
     }
 
     protected Module createModule()
