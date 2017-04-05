@@ -1,14 +1,14 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
- *
- *  GraphHopper licenses this file to you under the Apache License, 
+ * 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
- *
+ * 
  *       http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,14 +17,14 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.reader.OSMWay;
+import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.storage.*;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.GHUtility;
 import com.graphhopper.util.Helper;
-import java.text.DateFormat;
 import org.junit.Test;
 
+import java.text.DateFormat;
 import java.util.Date;
 
 import static org.junit.Assert.*;
@@ -32,13 +32,11 @@ import static org.junit.Assert.*;
 /**
  * @author Peter Karich
  */
-public class MotorcycleFlagEncoderTest
-{
+public class MotorcycleFlagEncoderTest {
     private final EncodingManager em = new EncodingManager("motorcycle,foot");
     private final MotorcycleFlagEncoder encoder = (MotorcycleFlagEncoder) em.getEncoder("motorcycle");
 
-    private Graph initExampleGraph()
-    {
+    private Graph initExampleGraph() {
         GraphHopperStorage gs = new GraphHopperStorage(new RAMDirectory(), em, true, new GraphExtension.NoOpExtension()).create(1000);
         NodeAccess na = gs.getNodeAccess();
         // 50--(0.0001)-->49--(0.0004)-->55--(0.0005)-->60
@@ -53,9 +51,8 @@ public class MotorcycleFlagEncoderTest
     }
 
     @Test
-    public void testAccess()
-    {
-        OSMWay way = new OSMWay(1);
+    public void testAccess() {
+        ReaderWay way = new ReaderWay(1);
         assertFalse(encoder.acceptWay(way) > 0);
         way.setTag("highway", "service");
         assertTrue(encoder.acceptWay(way) > 0);
@@ -127,9 +124,8 @@ public class MotorcycleFlagEncoderTest
     }
 
     @Test
-    public void testHandleWayTags()
-    {
-        OSMWay way = new OSMWay(1);
+    public void testHandleWayTags() {
+        ReaderWay way = new ReaderWay(1);
         way.setTag("highway", "service");
         long flags = encoder.acceptWay(way);
         assertTrue(flags > 0);
@@ -139,8 +135,7 @@ public class MotorcycleFlagEncoderTest
     }
 
     @Test
-    public void testSetSpeed0_issue367()
-    {
+    public void testSetSpeed0_issue367() {
         long flags = encoder.setProperties(10, true, true);
         flags = encoder.setSpeed(flags, 0);
 
@@ -151,8 +146,7 @@ public class MotorcycleFlagEncoderTest
     }
 
     @Test
-    public void testCurvature()
-    {
+    public void testCurvature() {
         Graph graph = initExampleGraph();
         EdgeIteratorState edge = GHUtility.getEdge(graph, 0, 1);
 
@@ -162,9 +156,8 @@ public class MotorcycleFlagEncoderTest
         assertTrue("The bendiness of the straight road is smaller than the one of the curvy road", bendinessOfCurvyWay < bendinessOfStraightWay);
     }
 
-    private double getBendiness( EdgeIteratorState edge, double estimatedDistance )
-    {
-        OSMWay way = new OSMWay(1);
+    private double getBendiness(EdgeIteratorState edge, double estimatedDistance) {
+        ReaderWay way = new ReaderWay(1);
         way.setTag("highway", "primary");
         way.setTag("estimated_distance", estimatedDistance);
         long includeWay = encoder.acceptWay(way);

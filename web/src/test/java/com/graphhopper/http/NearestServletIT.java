@@ -1,9 +1,9 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
  * 
- *  GraphHopper licenses this file to you under the Apache License, 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
  * 
@@ -17,48 +17,42 @@
  */
 package com.graphhopper.http;
 
-import static com.graphhopper.http.BaseServletTester.shutdownJetty;
-
 import com.graphhopper.util.CmdArgs;
 import com.graphhopper.util.Helper;
-
-import java.io.File;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.junit.Assert.*;
+import java.io.File;
+
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * @author svantulden
  */
-public class NearestServletIT extends BaseServletTester
-{
+public class NearestServletIT extends BaseServletTester {
     private static final String dir = "./target/andorra-gh/";
 
     @AfterClass
-    public static void cleanUp()
-    {
+    public static void cleanUp() {
         Helper.removeDir(new File(dir));
         shutdownJetty(true);
     }
 
     @Before
-    public void setUp()
-    {
+    public void setUp() {
         CmdArgs args = new CmdArgs().
                 put("config", "../config-example.properties").
-                put("osmreader.osm", "../core/files/andorra.osm.pbf").
+                put("datareader.file", "../core/files/andorra.osm.pbf").
                 put("graph.location", dir);
         setUpJetty(args);
     }
 
     @Test
-    public void testBasicNearestQuery() throws Exception
-    {
+    public void testBasicNearestQuery() throws Exception {
         JSONObject json = nearestQuery("point=42.554851,1.536198");
         assertFalse(json.has("error"));
         JSONArray point = json.getJSONArray("coordinates");

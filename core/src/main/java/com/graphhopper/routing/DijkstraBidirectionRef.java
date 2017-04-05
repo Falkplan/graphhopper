@@ -1,9 +1,9 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
  * 
- *  GraphHopper licenses this file to you under the Apache License, 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
  * 
@@ -17,156 +17,130 @@
  */
 package com.graphhopper.routing;
 
-import gnu.trove.map.TIntObjectMap;
-import gnu.trove.map.hash.TIntObjectHashMap;
+import com.carrotsearch.hppc.IntObjectMap;
+import com.graphhopper.coll.GHIntObjectHashMap;
+import com.graphhopper.routing.util.TraversalMode;
+import com.graphhopper.routing.weighting.Weighting;
+import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.SPTEntry;
+import com.graphhopper.util.*;
 
 import java.util.PriorityQueue;
-
-import com.graphhopper.routing.util.FlagEncoder;
-import com.graphhopper.routing.util.TraversalMode;
-import com.graphhopper.routing.util.Weighting;
-import com.graphhopper.storage.SPTEntry;
-import com.graphhopper.storage.Graph;
-import com.graphhopper.util.EdgeExplorer;
-import com.graphhopper.util.EdgeIterator;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.GHUtility;
 
 /**
  * Calculates best path in bidirectional way.
  * <p>
  * 'Ref' stands for reference implementation and is using the normal Java-'reference'-way.
  * <p>
+ *
  * @author Peter Karich
  */
-public class DijkstraBidirectionRef extends AbstractBidirAlgo
-{
-    private PriorityQueue<SPTEntry> openSetFrom;
-    private PriorityQueue<SPTEntry> openSetTo;
-    protected TIntObjectMap<SPTEntry> bestWeightMapFrom;
-    protected TIntObjectMap<SPTEntry> bestWeightMapTo;
-    protected TIntObjectMap<SPTEntry> bestWeightMapOther;
+public class DijkstraBidirectionRef extends AbstractBidirAlgo {
+    protected IntObjectMap<SPTEntry> bestWeightMapFrom;
+    protected IntObjectMap<SPTEntry> bestWeightMapTo;
+    protected IntObjectMap<SPTEntry> bestWeightMapOther;
     protected SPTEntry currFrom;
     protected SPTEntry currTo;
     protected PathBidirRef bestPath;
+    private PriorityQueue<SPTEntry> pqOpenSetFrom;
+    private PriorityQueue<SPTEntry> pqOpenSetTo;
     private boolean updateBestPath = true;
 
-    public DijkstraBidirectionRef( Graph graph, FlagEncoder encoder, Weighting weighting, TraversalMode tMode )
-    {
-        super(graph, encoder, weighting, tMode);
-        initCollections(1000);
+    public DijkstraBidirectionRef(Graph graph, Weighting weighting, TraversalMode tMode) {
+        super(graph, weighting, tMode);
+        int size = Math.min(Math.max(200, graph.getNodes() / 10), 150_000);
+        initCollections(size);
     }
 
-    protected void initCollections( int nodes )
-    {
-        openSetFrom = new PriorityQueue<SPTEntry>(nodes / 10);
-        bestWeightMapFrom = new TIntObjectHashMap<SPTEntry>(nodes / 10);
+    protected void initCollections(int size) {
+        pqOpenSetFrom = new PriorityQueue<SPTEntry>(size);
+        bestWeightMapFrom = new GHIntObjectHashMap<SPTEntry>(size);
 
-        openSetTo = new PriorityQueue<SPTEntry>(nodes / 10);
-        bestWeightMapTo = new TIntObjectHashMap<SPTEntry>(nodes / 10);
+        pqOpenSetTo = new PriorityQueue<SPTEntry>(size);
+        bestWeightMapTo = new GHIntObjectHashMap<SPTEntry>(size);
     }
 
     @Override
-    public void initFrom( int from, double weight )
-    {
+    public void initFrom(int from, double weight) {
         currFrom = createSPTEntry(from, weight);
-        openSetFrom.add(currFrom);
-        if (!traversalMode.isEdgeBased())
-        {
+        pqOpenSetFrom.add(currFrom);
+        if (!traversalMode.isEdgeBased()) {
             bestWeightMapFrom.put(from, currFrom);
-            if (currTo != null)
-            {
+            if (currTo != null) {
                 bestWeightMapOther = bestWeightMapTo;
                 updateBestPath(GHUtility.getEdge(graph, from, currTo.adjNode), currTo, from);
             }
-        } else
-        {
-            if (currTo != null && currTo.adjNode == from)
-            {
-                // special case of identical start and end
-                bestPath.sptEntry = currFrom;
-                bestPath.edgeTo = currTo;
-                finishedFrom = true;
-                finishedTo = true;
-            }
+        } else if (currTo != null && currTo.adjNode == from) {
+            // special case of identical start and end
+            bestPath.sptEntry = currFrom;
+            bestPath.edgeTo = currTo;
+            finishedFrom = true;
+            finishedTo = true;
         }
     }
 
     @Override
-    public void initTo( int to, double weight )
-    {
+    public void initTo(int to, double weight) {
         currTo = createSPTEntry(to, weight);
-        openSetTo.add(currTo);
-        if (!traversalMode.isEdgeBased())
-        {
+        pqOpenSetTo.add(currTo);
+        if (!traversalMode.isEdgeBased()) {
             bestWeightMapTo.put(to, currTo);
-            if (currFrom != null)
-            {
+            if (currFrom != null) {
                 bestWeightMapOther = bestWeightMapFrom;
                 updateBestPath(GHUtility.getEdge(graph, currFrom.adjNode, to), currFrom, to);
             }
-        } else
-        {
-            if (currFrom != null && currFrom.adjNode == to)
-            {
-                // special case of identical start and end
-                bestPath.sptEntry = currFrom;
-                bestPath.edgeTo = currTo;
-                finishedFrom = true;
-                finishedTo = true;
-            }
+        } else if (currFrom != null && currFrom.adjNode == to) {
+            // special case of identical start and end
+            bestPath.sptEntry = currFrom;
+            bestPath.edgeTo = currTo;
+            finishedFrom = true;
+            finishedTo = true;
         }
     }
 
     @Override
-    protected Path createAndInitPath()
-    {
-        bestPath = new PathBidirRef(graph, flagEncoder);
+    protected Path createAndInitPath() {
+        bestPath = new PathBidirRef(graph, weighting);
         return bestPath;
     }
 
     @Override
-    protected Path extractPath()
-    {
+    protected Path extractPath() {
         if (finished())
             return bestPath.extract();
-        
+
         return bestPath;
     }
 
     @Override
-    protected double getCurrentFromWeight()
-    {
+    protected double getCurrentFromWeight() {
         return currFrom.weight;
     }
 
     @Override
-    protected double getCurrentToWeight()
-    {
+    protected double getCurrentToWeight() {
         return currTo.weight;
     }
 
     @Override
-    public boolean fillEdgesFrom()
-    {
-        if (openSetFrom.isEmpty())
+    public boolean fillEdgesFrom() {
+        if (pqOpenSetFrom.isEmpty())
             return false;
 
-        currFrom = openSetFrom.poll();
+        currFrom = pqOpenSetFrom.poll();
         bestWeightMapOther = bestWeightMapTo;
-        fillEdges(currFrom, openSetFrom, bestWeightMapFrom, outEdgeExplorer, false);
+        fillEdges(currFrom, pqOpenSetFrom, bestWeightMapFrom, outEdgeExplorer, false);
         visitedCountFrom++;
         return true;
     }
 
     @Override
-    public boolean fillEdgesTo()
-    {
-        if (openSetTo.isEmpty())
+    public boolean fillEdgesTo() {
+        if (pqOpenSetTo.isEmpty())
             return false;
-        currTo = openSetTo.poll();
+        currTo = pqOpenSetTo.poll();
         bestWeightMapOther = bestWeightMapFrom;
-        fillEdges(currTo, openSetTo, bestWeightMapTo, inEdgeExplorer, true);
+        fillEdges(currTo, pqOpenSetTo, bestWeightMapTo, inEdgeExplorer, true);
         visitedCountTo++;
         return true;
     }
@@ -176,26 +150,17 @@ public class DijkstraBidirectionRef extends AbstractBidirAlgo
     // => when scanning an arc (v, w) in the forward search and w is scanned in the reverseOrder 
     //    search, update extractPath = μ if df (v) + (v, w) + dr (w) < μ            
     @Override
-    public boolean finished()
-    {
+    public boolean finished() {
         if (finishedFrom || finishedTo)
             return true;
 
         return currFrom.weight + currTo.weight >= bestPath.getWeight();
     }
 
-    @Override
-    protected boolean isWeightLimitExceeded()
-    {
-        return currFrom.weight + currTo.weight > weightLimit;
-    }
-
-    void fillEdges( SPTEntry currEdge, PriorityQueue<SPTEntry> prioQueue,
-                    TIntObjectMap<SPTEntry> shortestWeightMap, EdgeExplorer explorer, boolean reverse )
-    {        
+    void fillEdges(SPTEntry currEdge, PriorityQueue<SPTEntry> prioQueue,
+                   IntObjectMap<SPTEntry> bestWeightMap, EdgeExplorer explorer, boolean reverse) {
         EdgeIterator iter = explorer.setBaseNode(currEdge.adjNode);
-        while (iter.next())
-        {
+        while (iter.next()) {
             if (!accept(iter, currEdge.edge))
                 continue;
 
@@ -203,16 +168,13 @@ public class DijkstraBidirectionRef extends AbstractBidirAlgo
             double tmpWeight = weighting.calcWeight(iter, reverse, currEdge.edge) + currEdge.weight;
             if (Double.isInfinite(tmpWeight))
                 continue;
-
-            SPTEntry ee = shortestWeightMap.get(traversalId);
-            if (ee == null)
-            {
+            SPTEntry ee = bestWeightMap.get(traversalId);
+            if (ee == null) {
                 ee = new SPTEntry(iter.getEdge(), iter.getAdjNode(), tmpWeight);
                 ee.parent = currEdge;
-                shortestWeightMap.put(traversalId, ee);
+                bestWeightMap.put(traversalId, ee);
                 prioQueue.add(ee);
-            } else if (ee.weight > tmpWeight)
-            {
+            } else if (ee.weight > tmpWeight) {
                 prioQueue.remove(ee);
                 ee.edge = iter.getEdge();
                 ee.weight = tmpWeight;
@@ -227,8 +189,7 @@ public class DijkstraBidirectionRef extends AbstractBidirAlgo
     }
 
     @Override
-    protected void updateBestPath( EdgeIteratorState edgeState, SPTEntry entryCurrent, int traversalId )
-    {
+    protected void updateBestPath(EdgeIteratorState edgeState, SPTEntry entryCurrent, int traversalId) {
         SPTEntry entryOther = bestWeightMapOther.get(traversalId);
         if (entryOther == null)
             return;
@@ -237,26 +198,20 @@ public class DijkstraBidirectionRef extends AbstractBidirAlgo
 
         // update μ
         double newWeight = entryCurrent.weight + entryOther.weight;
-        if (traversalMode.isEdgeBased())
-        {
+        if (traversalMode.isEdgeBased()) {
             if (entryOther.edge != entryCurrent.edge)
                 throw new IllegalStateException("cannot happen for edge based execution of " + getName());
 
-            if (entryOther.adjNode != entryCurrent.adjNode)
-            {
+            if (entryOther.adjNode != entryCurrent.adjNode) {
                 // prevents the path to contain the edge at the meeting point twice and subtract the weight (excluding turn weight => no previous edge)
                 entryCurrent = entryCurrent.parent;
                 newWeight -= weighting.calcWeight(edgeState, reverse, EdgeIterator.NO_EDGE);
-            } else
-            {
+            } else if (!traversalMode.hasUTurnSupport())
                 // we detected a u-turn at meeting point, skip if not supported
-                if (!traversalMode.hasUTurnSupport())
-                    return;
-            }
+                return;
         }
 
-        if (newWeight < bestPath.getWeight())
-        {
+        if (newWeight < bestPath.getWeight()) {
             bestPath.setSwitchToFrom(reverse);
             bestPath.setSPTEntry(entryCurrent);
             bestPath.setWeight(newWeight);
@@ -264,24 +219,20 @@ public class DijkstraBidirectionRef extends AbstractBidirAlgo
         }
     }
 
-    TIntObjectMap<SPTEntry> getBestFromMap()
-    {
+    IntObjectMap<SPTEntry> getBestFromMap() {
         return bestWeightMapFrom;
     }
 
-    TIntObjectMap<SPTEntry> getBestToMap()
-    {
+    IntObjectMap<SPTEntry> getBestToMap() {
         return bestWeightMapTo;
     }
 
-    void setBestOtherMap( TIntObjectMap<SPTEntry> other )
-    {
+    void setBestOtherMap(IntObjectMap<SPTEntry> other) {
         bestWeightMapOther = other;
     }
 
-    void setFromDataStructures( DijkstraBidirectionRef dijkstra )
-    {
-        openSetFrom = dijkstra.openSetFrom;
+    void setFromDataStructures(DijkstraBidirectionRef dijkstra) {
+        pqOpenSetFrom = dijkstra.pqOpenSetFrom;
         bestWeightMapFrom = dijkstra.bestWeightMapFrom;
         finishedFrom = dijkstra.finishedFrom;
         currFrom = dijkstra.currFrom;
@@ -289,9 +240,8 @@ public class DijkstraBidirectionRef extends AbstractBidirAlgo
         // outEdgeExplorer
     }
 
-    void setToDataStructures( DijkstraBidirectionRef dijkstra )
-    {
-        openSetTo = dijkstra.openSetTo;
+    void setToDataStructures(DijkstraBidirectionRef dijkstra) {
+        pqOpenSetTo = dijkstra.pqOpenSetTo;
         bestWeightMapTo = dijkstra.bestWeightMapTo;
         finishedTo = dijkstra.finishedTo;
         currTo = dijkstra.currTo;
@@ -299,19 +249,16 @@ public class DijkstraBidirectionRef extends AbstractBidirAlgo
         // inEdgeExplorer
     }
 
-    void setUpdateBestPath( boolean b )
-    {
+    protected void setUpdateBestPath(boolean b) {
         updateBestPath = b;
     }
 
-    void setBestPath( PathBidirRef bestPath )
-    {
+    void setBestPath(PathBidirRef bestPath) {
         this.bestPath = bestPath;
     }
 
     @Override
-    public String getName()
-    {
-        return AlgorithmOptions.DIJKSTRA_BI;
+    public String getName() {
+        return Parameters.Algorithms.DIJKSTRA_BI;
     }
 }

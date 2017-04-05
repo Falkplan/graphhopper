@@ -1,9 +1,9 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
  * 
- *  GraphHopper licenses this file to you under the Apache License, 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
  * 
@@ -19,46 +19,43 @@ package com.graphhopper.http;
 
 import com.graphhopper.util.CmdArgs;
 import com.graphhopper.util.Helper;
-
-import java.io.File;
-
+import com.graphhopper.util.Parameters;
 import org.json.JSONObject;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
+
+import java.io.File;
 
 import static org.junit.Assert.*;
 
 /**
  * @author Peter Karich
  */
-public class GraphHopperServletWithEleIT extends BaseServletTester
-{
+public class GraphHopperServletWithEleIT extends BaseServletTester {
     private static final String dir = "./target/monaco-gh/";
 
     @AfterClass
-    public static void cleanUp()
-    {
+    public static void cleanUp() {
         Helper.removeDir(new File(dir));
         shutdownJetty(true);
     }
 
     @Before
-    public void setUp()
-    {
+    public void setUp() {
         CmdArgs args = new CmdArgs().
                 put("graph.elevation.provider", "srtm").
                 put("graph.elevation.cachedir", "../core/files/").
-                put("prepare.chWeighting", "no").
+                put(Parameters.CH.PREPARE + "weightings", "no").
+                put("prepare.min_one_way_network_size", "0").
                 put("config", "../config-example.properties").
-                put("osmreader.osm", "../core/files/monaco.osm.gz").
+                put("datareader.file", "../core/files/monaco.osm.gz").
                 put("graph.location", dir);
         setUpJetty(args);
     }
 
     @Test
-    public void testElevation() throws Exception
-    {
+    public void testElevation() throws Exception {
         JSONObject json = query("point=43.730864,7.420771&point=43.727687,7.418737&points_encoded=false&elevation=true", 200);
         JSONObject infoJson = json.getJSONObject("info");
         assertFalse(infoJson.has("errors"));
@@ -76,8 +73,7 @@ public class GraphHopperServletWithEleIT extends BaseServletTester
     }
 
     @Test
-    public void testNoElevation() throws Exception
-    {
+    public void testNoElevation() throws Exception {
         // default is elevation=false
         JSONObject json = query("point=43.730864,7.420771&point=43.727687,7.418737&points_encoded=false", 200);
         JSONObject infoJson = json.getJSONObject("info");

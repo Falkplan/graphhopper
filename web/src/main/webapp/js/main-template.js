@@ -1,17 +1,17 @@
 global.d3 = require('d3');
 var L = require('leaflet');
+require('leaflet-contextmenu');
 require('leaflet-loading');
-require('./lib/leaflet.contextmenu.js');
-require('./lib/Leaflet.Elevation-0.0.2.min.js');
+require('./lib/leaflet.elevation-0.0.4.min.js');
 require('./lib/leaflet_numbered_markers.js');
 
 global.jQuery = require('jquery');
 global.$ = global.jQuery;
-require('./lib/jquery-ui-custom-1.11.4.min.js');
+require('./lib/jquery-ui-custom-1.12.0.min.js');
 require('./lib/jquery.history.js');
 require('./lib/jquery.autocomplete.js');
 
-var ghenv = require("./options.js").options;
+var ghenv = require("./config/options.js").options;
 console.log(ghenv.environment);
 
 var GHInput = require('./graphhopper/GHInput.js');
@@ -33,6 +33,7 @@ else
 
 var mapLayer = require('./map.js');
 var nominatim = require('./nominatim.js');
+var routeManipulation = require('./routeManipulation.js');
 var gpxExport = require('./gpxexport.js');
 var messages = require('./messages.js');
 var translate = require('./translate.js');
@@ -77,7 +78,7 @@ $(document).ready(function (e) {
             // https://github.com/defunkt/jquery-pjax/issues/143#issuecomment-6194330
 
             var state = History.getState();
-            log(state);
+            console.log(state);
             initFromParams(state.data, true);
         });
     }
@@ -93,6 +94,7 @@ $(document).ready(function (e) {
             .then(function (arg1, arg2) {
                 // init translation retrieved from first call (fetchTranslationMap)
                 var translations = arg1[0];
+                autocomplete.setLocale(translations.locale);
                 ghRequest.setLocale(translations.locale);
                 translate.init(translations);
 
@@ -154,12 +156,14 @@ $(document).ready(function (e) {
                 }
                 metaVersionInfo = messages.extractMetaVersionInfo(json);
 
-                mapLayer.initMap(bounds, setStartCoord, setIntermediateCoord, setEndCoord, urlParams.layer);
+                mapLayer.initMap(bounds, setStartCoord, setIntermediateCoord, setEndCoord, urlParams.layer, urlParams.use_miles);
 
                 // execute query
                 initFromParams(urlParams, true);
+
+                checkInput();
             }, function (err) {
-                log(err);
+                console.log(err);
                 $('#error').html('GraphHopper API offline? <a href="http://graphhopper.com/maps">Refresh</a>' + '<br/>Status: ' + err.statusText + '<br/>' + host);
 
                 bounds = {
@@ -169,7 +173,7 @@ $(document).ready(function (e) {
                     "maxLat": 90
                 };
                 nominatim.setBounds(bounds);
-                mapLayer.initMap(bounds, setStartCoord, setIntermediateCoord, setEndCoord);
+                mapLayer.initMap(bounds, setStartCoord, setIntermediateCoord, setEndCoord, urlParams.layer, urlParams.use_miles);
             });
 
     $(window).resize(function () {
@@ -301,24 +305,24 @@ function checkInput() {
         if (translate.isI18nIsInitialized()) {
             var input = div.find(".pointInput");
             if (i === 0)
-                $(input).attr("placeholder", translate.tr("fromHint"));
+                $(input).attr("placeholder", translate.tr("from_hint"));
             else if (i === (len - 1))
-                $(input).attr("placeholder", translate.tr("toHint"));
+                $(input).attr("placeholder", translate.tr("to_hint"));
             else
-                $(input).attr("placeholder", translate.tr("viaHint"));
+                $(input).attr("placeholder", translate.tr("via_hint"));
         }
     }
 }
 
 function setToStart(e) {
-    var latlng = e.target.getLatLng(),
+    var latlng = e.relatedTarget.getLatLng(),
             index = ghRequest.route.getIndexByCoord(latlng);
     ghRequest.route.move(index, 0);
     routeIfAllResolved();
 }
 
 function setToEnd(e) {
-    var latlng = e.target.getLatLng(),
+    var latlng = e.relatedTarget.getLatLng(),
             index = ghRequest.route.getIndexByCoord(latlng);
     ghRequest.route.move(index, -1);
     routeIfAllResolved();
@@ -331,14 +335,23 @@ function setStartCoord(e) {
 }
 
 function setIntermediateCoord(e) {
-    var index = ghRequest.route.size() - 1;
+    var routeLayers = mapLayer.getSubLayers("route");
+    var routeSegments = routeLayers.map(function(rl) {
+        return {
+            coordinates: rl.getLatLngs(),
+            wayPoints: rl.feature.properties.snapped_waypoints.coordinates.map(function(wp) {
+                return L.latLng(wp[1], wp[0]);
+            })
+        };
+    });
+    var index = routeManipulation.getIntermediatePointIndex(routeSegments, e.latlng);
     ghRequest.route.add(e.latlng.wrap(), index);
     resolveIndex(index);
     routeIfAllResolved();
 }
 
 function deleteCoord(e) {
-    var latlng = e.target.getLatLng();
+    var latlng = e.relatedTarget.getLatLng();
     ghRequest.route.removeSingle(latlng);
     mapLayer.clearLayers();
     routeLatLng(ghRequest, false);
@@ -378,13 +391,13 @@ function setFlag(coord, index) {
             this._openPopup();
         };
         var _tempItem = {
-            text: 'Set as Start',
+            text: translate.tr('set_start'),
+            icon: './img/marker-small-green.png',
             callback: setToStart,
-            index: 1,
-            state: 2
+            index: 1
         };
         if (toFrom === -1)
-            marker.options.contextmenuItems.push(_tempItem);// because the Mixin.ContextMenu isn't initialized
+            marker.options.contextmenuItems.push(_tempItem); // because the Mixin.ContextMenu isn't initialized
         marker.on('dragend', function (e) {
             mapLayer.clearLayers();
             // inconsistent leaflet API: event.target.getLatLng vs. mouseEvent.latlng?
@@ -450,7 +463,7 @@ function routeLatLng(request, doQuery) {
     if (!doQuery && History.enabled) {
         // 2. important workaround for encoding problems in history.js
         var params = urlTools.parseUrl(urlForHistory);
-        log(params);
+        console.log(params);
         params.do_zoom = doZoom;
         // force a new request even if we have the same parameters
         params.mathRandom = Math.random();
@@ -478,7 +491,7 @@ function routeLatLng(request, doQuery) {
         routeResultsDiv.html("");
         if (json.message) {
             var tmpErrors = json.message;
-            log(tmpErrors);
+            console.log(tmpErrors);
             if (json.hints) {
                 for (var m = 0; m < json.hints.length; m++) {
                     routeResultsDiv.append("<div class='error'>" + json.hints[m].message + "</div>");
@@ -489,7 +502,7 @@ function routeLatLng(request, doQuery) {
             return;
         }
 
-        function createClickHandler(geoJsons, currentLayerIndex, tabHeader, oneTab, hasElevation) {
+        function createClickHandler(geoJsons, currentLayerIndex, tabHeader, oneTab, hasElevation, useMiles) {
             return function () {
 
                 var currentGeoJson = geoJsons[currentLayerIndex];
@@ -508,7 +521,7 @@ function routeLatLng(request, doQuery) {
 
                 if (hasElevation) {
                     mapLayer.clearElevation();
-                    mapLayer.addElevation(currentGeoJson);
+                    mapLayer.addElevation(currentGeoJson, useMiles);
                 }
 
                 headerTabs.find("li").removeClass("current");
@@ -532,6 +545,24 @@ function routeLatLng(request, doQuery) {
         var geoJsons = [];
         var firstHeader;
 
+        // Create buttons to toggle between SI and imperial units.
+        var createUnitsChooserButtonClickHandler = function (useMiles) {
+            return function () {
+                mapLayer.updateScale(useMiles);
+                ghRequest.useMiles = useMiles;
+                resolveAll();
+                routeLatLng(ghRequest);
+            };
+        };
+
+        if(json.paths.length > 0 && json.paths[0].points_order) {
+            mapLayer.clearLayers();
+            var po = json.paths[0].points_order;
+            for (var i = 0; i < po.length; i++) {
+                setFlag(ghRequest.route.getIndex(po[i]), i);
+            }
+        }
+
         for (var pathIndex = 0; pathIndex < json.paths.length; pathIndex++) {
             var tabHeader = $("<li>").append((pathIndex + 1) + "<img class='alt_route_img' src='img/alt_route.png'/>");
             if (pathIndex === 0)
@@ -544,25 +575,45 @@ function routeLatLng(request, doQuery) {
             var geojsonFeature = {
                 "type": "Feature",
                 "geometry": path.points,
-                "properties": {"style": style}
+                "properties": {
+                    "style": style,
+                    name: "route",
+                    snapped_waypoints: path.snapped_waypoints
+                }
             };
 
             geoJsons.push(geojsonFeature);
             mapLayer.addDataToRoutingLayer(geojsonFeature);
             var oneTab = $("<div class='route_result_tab'>");
             routeResultsDiv.append(oneTab);
-            tabHeader.click(createClickHandler(geoJsons, pathIndex, tabHeader, oneTab, request.hasElevation()));
+            tabHeader.click(createClickHandler(geoJsons, pathIndex, tabHeader, oneTab, request.hasElevation(), request.useMiles));
 
             var tmpTime = translate.createTimeString(path.time);
-            var tmpDist = translate.createDistanceString(path.distance);
+            var tmpDist = translate.createDistanceString(path.distance, request.useMiles);
             var routeInfo = $("<div class='route_description'>");
             if (path.description && path.description.length > 0) {
                 routeInfo.text(path.description);
                 routeInfo.append("<br/>");
             }
-            routeInfo.append(translate.tr("routeInfo", [tmpDist, tmpTime]));
+            routeInfo.append(translate.tr("route_info", [tmpDist, tmpTime]));
+
+            var kmButton = $("<button class='plain_text_button " + (request.useMiles ? "gray" : "") + "'>");
+            kmButton.text(translate.tr2("km_abbr"));
+            kmButton.click(createUnitsChooserButtonClickHandler(false));
+
+            var miButton = $("<button class='plain_text_button " + (request.useMiles ? "" : "gray") + "'>");
+            miButton.text(translate.tr2("mi_abbr"));
+            miButton.click(createUnitsChooserButtonClickHandler(true));
+
+            var buttons = $("<span style='float: right;'>");
+            buttons.append(kmButton);
+            buttons.append('|');
+            buttons.append(miButton);
+
+            routeInfo.append(buttons);
+
             if (request.hasElevation()) {
-                routeInfo.append(translate.createEleInfoString(path.ascend, path.descend));
+                routeInfo.append(translate.createEleInfoString(path.ascend, path.descend, request.useMiles));
             }
             oneTab.append(routeInfo);
 
@@ -599,23 +650,23 @@ function mySubmit() {
             allStr = [],
             inputOk = true;
     var location_points = $("#locationpoints > div.pointDiv > input.pointInput");
-    var len = location_points.size();
+    var len = location_points.size;
     $.each(location_points, function (index) {
         if (index === 0) {
             fromStr = $(this).val();
-            if (fromStr !== translate.tr("fromHint") && fromStr !== "")
+            if (fromStr !== translate.tr("from_hint") && fromStr !== "")
                 allStr.push(fromStr);
             else
                 inputOk = false;
         } else if (index === (len - 1)) {
             toStr = $(this).val();
-            if (toStr !== translate.tr("toHint") && toStr !== "")
+            if (toStr !== translate.tr("to_hint") && toStr !== "")
                 allStr.push(toStr);
             else
                 inputOk = false;
         } else {
             viaStr = $(this).val();
-            if (viaStr !== translate.tr("viaHint") && viaStr !== "")
+            if (viaStr !== translate.tr("via_hint") && viaStr !== "")
                 allStr.push(viaStr);
             else
                 inputOk = false;
@@ -625,11 +676,11 @@ function mySubmit() {
         // TODO print warning
         return;
     }
-    if (fromStr === translate.tr("fromHint")) {
+    if (fromStr === translate.tr("from_hint")) {
         // no special function
         return;
     }
-    if (toStr === translate.tr("toHint")) {
+    if (toStr === translate.tr("to_hint")) {
         // lookup area
         ghRequest.from.setStr(fromStr);
         $.when(resolveFrom()).done(function () {

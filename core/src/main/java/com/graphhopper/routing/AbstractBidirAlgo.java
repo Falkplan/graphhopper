@@ -1,14 +1,14 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for
+ *  Licensed to GraphHopper GmbH under one or more contributor
+ *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
- *
- *  GraphHopper licenses this file to you under the Apache License,
- *  Version 2.0 (the "License"); you may not use this file except in
+ * 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
+ *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
- *
+ * 
  *       http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,24 +19,28 @@ package com.graphhopper.routing;
 
 import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.routing.util.TraversalMode;
-import com.graphhopper.routing.util.Weighting;
+import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.Graph;
 
 /**
  * Common subclass for bidirectional algorithms.
  * <p>
+ *
  * @author Peter Karich
  */
-public abstract class AbstractBidirAlgo extends AbstractRoutingAlgorithm
-{
-    int visitedCountFrom;
-    int visitedCountTo;
+public abstract class AbstractBidirAlgo extends AbstractRoutingAlgorithm {
     protected boolean finishedFrom;
     protected boolean finishedTo;
+    int visitedCountFrom;
+    int visitedCountTo;
 
-    abstract void initFrom( int from, double dist );
+    public AbstractBidirAlgo(Graph graph, Weighting weighting, TraversalMode tMode) {
+        super(graph, weighting, tMode);
+    }
 
-    abstract void initTo( int to, double dist );
+    abstract void initFrom(int from, double dist);
+
+    abstract void initTo(int to, double dist);
 
     protected abstract Path createAndInitPath();
 
@@ -48,14 +52,8 @@ public abstract class AbstractBidirAlgo extends AbstractRoutingAlgorithm
 
     abstract boolean fillEdgesTo();
 
-    public AbstractBidirAlgo( Graph graph, FlagEncoder encoder, Weighting weighting, TraversalMode tMode )
-    {
-        super(graph, encoder, weighting, tMode);
-    }
-
     @Override
-    public Path calcPath( int from, int to )
-    {
+    public Path calcPath(int from, int to) {
         checkAlreadyRun();
         createAndInitPath();
         initFrom(from, 0);
@@ -64,10 +62,8 @@ public abstract class AbstractBidirAlgo extends AbstractRoutingAlgorithm
         return extractPath();
     }
 
-    protected void runAlgo()
-    {
-        while (!finished() && !isWeightLimitExceeded())
-        {
+    protected void runAlgo() {
+        while (!finished() && !isMaxVisitedNodesExceeded()) {
             if (!finishedFrom)
                 finishedFrom = !fillEdgesFrom();
 
@@ -77,8 +73,7 @@ public abstract class AbstractBidirAlgo extends AbstractRoutingAlgorithm
     }
 
     @Override
-    public int getVisitedNodes()
-    {
+    public int getVisitedNodes() {
         return visitedCountFrom + visitedCountTo;
     }
 }

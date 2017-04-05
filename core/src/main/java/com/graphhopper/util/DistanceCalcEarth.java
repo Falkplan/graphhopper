@@ -1,14 +1,14 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
  * 
- *  GraphHopper licenses this file to you under the Apache License, 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
- *
+ * 
  *       http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,8 +25,7 @@ import static java.lang.Math.*;
 /**
  * @author Peter Karich
  */
-public class DistanceCalcEarth implements DistanceCalc
-{
+public class DistanceCalcEarth implements DistanceCalc {
     /**
      * mean radius of the earth
      */
@@ -48,14 +47,13 @@ public class DistanceCalcEarth implements DistanceCalc
      * cos(lat1).cos(lat2).sin²(Δlong/2) c = 2.atan2(√a, √(1−a)) d = R.c
      */
     @Override
-    public double calcDist( double fromLat, double fromLon, double toLat, double toLon )
-    {
+    public double calcDist(double fromLat, double fromLon, double toLat, double toLon) {
         double normedDist = calcNormalizedDist(fromLat, fromLon, toLat, toLon);
         return R * 2 * asin(sqrt(normedDist));
     }
 
-    public double calcDenormalizedDist( double normedDist )
-    {
+    @Override
+    public double calcDenormalizedDist(double normedDist) {
         return R * 2 * asin(sqrt(normedDist));
     }
 
@@ -63,15 +61,13 @@ public class DistanceCalcEarth implements DistanceCalc
      * Returns the specified length in normalized meter.
      */
     @Override
-    public double calcNormalizedDist( double dist )
-    {
+    public double calcNormalizedDist(double dist) {
         double tmp = sin(dist / 2 / R);
         return tmp * tmp;
     }
 
     @Override
-    public double calcNormalizedDist( double fromLat, double fromLon, double toLat, double toLon )
-    {
+    public double calcNormalizedDist(double fromLat, double fromLon, double toLat, double toLon) {
         double sinDeltaLat = sin(toRadians(toLat - fromLat) / 2);
         double sinDeltaLon = sin(toRadians(toLon - fromLon) / 2);
         return sinDeltaLat * sinDeltaLat
@@ -81,19 +77,16 @@ public class DistanceCalcEarth implements DistanceCalc
     /**
      * Circumference of the earth at different latitudes (breitengrad)
      */
-    public double calcCircumference( double lat )
-    {
+    public double calcCircumference(double lat) {
         return 2 * PI * R * cos(toRadians(lat));
     }
 
-    public boolean isDateLineCrossOver( double lon1, double lon2 )
-    {
+    public boolean isDateLineCrossOver(double lon1, double lon2) {
         return abs(lon1 - lon2) > 180.0;
     }
 
     @Override
-    public BBox createBBox( double lat, double lon, double radiusInMeter )
-    {
+    public BBox createBBox(double lat, double lon, double radiusInMeter) {
         if (radiusInMeter <= 0)
             throw new IllegalArgumentException("Distance must not be zero or negative! " + radiusInMeter + " lat,lon:" + lat + "," + lon);
 
@@ -108,23 +101,22 @@ public class DistanceCalcEarth implements DistanceCalc
     }
 
     @Override
-    public double calcNormalizedEdgeDistance( double r_lat_deg, double r_lon_deg,
-                                              double a_lat_deg, double a_lon_deg,
-                                              double b_lat_deg, double b_lon_deg )
-    {
+    public double calcNormalizedEdgeDistance(double r_lat_deg, double r_lon_deg,
+                                             double a_lat_deg, double a_lon_deg,
+                                             double b_lat_deg, double b_lon_deg) {
         return calcNormalizedEdgeDistanceNew(r_lat_deg, r_lon_deg, a_lat_deg, a_lon_deg, b_lat_deg, b_lon_deg, false);
     }
 
     /**
      * New edge distance calculation where no validEdgeDistance check would be necessary
      * <p>
+     *
      * @return the normalized distance of the query point "r" to the project point "c" onto the line
      * segment a-b
      */
-    public double calcNormalizedEdgeDistanceNew( double r_lat_deg, double r_lon_deg,
-                                                 double a_lat_deg, double a_lon_deg,
-                                                 double b_lat_deg, double b_lon_deg, boolean reduceToSegment )
-    {
+    public double calcNormalizedEdgeDistanceNew(double r_lat_deg, double r_lon_deg,
+                                                double a_lat_deg, double a_lon_deg,
+                                                double b_lat_deg, double b_lon_deg, boolean reduceToSegment) {
         double shrinkFactor = calcShrinkFactor(a_lat_deg, b_lat_deg);
 
         double a_lat = a_lat_deg;
@@ -151,8 +143,7 @@ public class DistanceCalcEarth implements DistanceCalc
         double factor = ((r_lon - a_lon) * delta_lon + (r_lat - a_lat) * delta_lat) / norm;
 
         // make new calculation compatible to old
-        if (reduceToSegment)
-        {
+        if (reduceToSegment) {
             if (factor > 1)
                 factor = 1;
             else if (factor < 0)
@@ -169,10 +160,9 @@ public class DistanceCalcEarth implements DistanceCalc
     }
 
     @Override
-    public GHPoint calcCrossingPointToEdge( double r_lat_deg, double r_lon_deg,
-                                            double a_lat_deg, double a_lon_deg,
-                                            double b_lat_deg, double b_lon_deg )
-    {
+    public GHPoint calcCrossingPointToEdge(double r_lat_deg, double r_lon_deg,
+                                           double a_lat_deg, double a_lon_deg,
+                                           double b_lat_deg, double b_lon_deg) {
         double shrinkFactor = calcShrinkFactor(a_lat_deg, b_lat_deg);
         double a_lat = a_lat_deg;
         double a_lon = a_lon_deg * shrinkFactor;
@@ -204,10 +194,9 @@ public class DistanceCalcEarth implements DistanceCalc
     }
 
     @Override
-    public boolean validEdgeDistance( double r_lat_deg, double r_lon_deg,
-                                      double a_lat_deg, double a_lon_deg,
-                                      double b_lat_deg, double b_lon_deg )
-    {
+    public boolean validEdgeDistance(double r_lat_deg, double r_lon_deg,
+                                     double a_lat_deg, double a_lon_deg,
+                                     double b_lat_deg, double b_lon_deg) {
         double shrinkFactor = calcShrinkFactor(a_lat_deg, b_lat_deg);
         double a_lat = a_lat_deg;
         double a_lon = a_lon_deg * shrinkFactor;
@@ -236,8 +225,37 @@ public class DistanceCalcEarth implements DistanceCalc
     }
 
     @Override
-    public String toString()
-    {
+    public GHPoint projectCoordinate(double latInDeg, double lonInDeg, double distanceInMeter, double headingClockwiseFromNorth) {
+        double angularDistance = distanceInMeter / R;
+
+        double latInRadians = Math.toRadians(latInDeg);
+        double lonInRadians = Math.toRadians(lonInDeg);
+        double headingInRadians = Math.toRadians(headingClockwiseFromNorth);
+
+        // This formula is taken from: http://williams.best.vwh.net/avform.htm#LL (http://www.movable-type.co.uk/scripts/latlong.html -> https://github.com/chrisveness/geodesy MIT)
+        // θ=heading,δ=distance,φ1=latInRadians
+        // lat2 = asin( sin φ1 ⋅ cos δ + cos φ1 ⋅ sin δ ⋅ cos θ )     
+        // lon2 = λ1 + atan2( sin θ ⋅ sin δ ⋅ cos φ1, cos δ − sin φ1 ⋅ sin φ2 )
+        double projectedLat = Math.asin(Math.sin(latInRadians) * Math.cos(angularDistance)
+                + Math.cos(latInRadians) * Math.sin(angularDistance) * Math.cos(headingInRadians));
+        double projectedLon = lonInRadians + Math.atan2(Math.sin(headingInRadians) * Math.sin(angularDistance) * Math.cos(latInRadians),
+                Math.cos(angularDistance) - Math.sin(latInRadians) * Math.sin(projectedLat));
+
+        projectedLon = (projectedLon + 3 * Math.PI) % (2 * Math.PI) - Math.PI; // normalise to -180..+180°
+
+        projectedLat = Math.toDegrees(projectedLat);
+        projectedLon = Math.toDegrees(projectedLon);
+
+        return new GHPoint(projectedLat, projectedLon);
+    }
+
+    @Override
+    public boolean isCrossBoundary(double lon1, double lon2) {
+        return abs(lon1 - lon2) > 300;
+    }
+
+    @Override
+    public String toString() {
         return "EXACT";
     }
 }

@@ -1,14 +1,14 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for
+ *  Licensed to GraphHopper GmbH under one or more contributor
+ *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
- *
- *  GraphHopper licenses this file to you under the Apache License,
- *  Version 2.0 (the "License"); you may not use this file except in
+ * 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
+ *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
- *
+ * 
  *       http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,8 +27,10 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHolder;
 import java.util.EnumSet;
 import javax.servlet.DispatcherType;
-
 import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.server.handler.ResourceHandler;
 import org.eclipse.jetty.server.nio.SelectChannelConnector;
@@ -36,43 +38,42 @@ import org.eclipse.jetty.server.ssl.SslSelectChannelConnector;
 import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.eclipse.jetty.server.handler.gzip.GzipHandler;
+import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.servlet.DispatcherType;
+import java.util.EnumSet;
 
 /**
  * Simple server similar to integration tests setup.
  */
-public class GHServer
-{
-    public static void main( String[] args ) throws Exception
-    {
-        new GHServer(CmdArgs.read(args)).start();
-    }
-
+public class GHServer {
     private final CmdArgs args;
-    private Server server;
     private final Logger logger = LoggerFactory.getLogger(getClass());
+    private Server server;
 
-    public GHServer( CmdArgs args )
-    {
+    public GHServer(CmdArgs args) {
         this.args = args;
     }
 
-    public void start() throws Exception
-    {
+    public static void main(String[] args) throws Exception {
+        new GHServer(CmdArgs.read(args)).start();
+    }
+
+    public void start() throws Exception {
         Injector injector = Guice.createInjector(createModule());
         start(injector);
     }
 
-    public void start( Injector injector ) throws Exception
-    {
+    public void start(Injector injector) throws Exception {
         ResourceHandler resHandler = new ResourceHandler();
         resHandler.setDirectoriesListed(false);
-        resHandler.setWelcomeFiles(new String[]
-        {
-            "index.html"
+        resHandler.setWelcomeFiles(new String[]{
+                "index.html"
         });
-        resHandler.setResourceBase(args.get("jetty.resourcebase", "./src/main/webapp"));
+        resHandler.setResourceBase(args.get("jetty.resourcebase", "./web/src/main/webapp"));
 
         server = new Server();
         // getSessionHandler and getSecurityHandler should always return null
@@ -85,12 +86,17 @@ public class GHServer
         FilterHolder guiceFilter = new FilterHolder(injector.getInstance(GuiceFilter.class));
         servHandler.addFilter(guiceFilter, "/*", EnumSet.allOf(DispatcherType.class));
 
-        SelectChannelConnector connector0 = new SelectChannelConnector();
+        ServerConnector connector0 = new ServerConnector(server);
         int httpPort = args.getInt("jetty.port", 8989);
         int httpsPort = args.getInt("jetty.sslPort", 443);
         String host = args.get("jetty.host", "");
-        connector0.setPort(httpPort);        
         connector0.setRequestHeaderSize(16192);
+        connector0.setPort(httpPort);
+
+        int requestHeaderSize = args.getInt("jetty.request_header_size", -1);
+        if (requestHeaderSize > 0)
+            connector0.getConnectionFactory(HttpConnectionFactory.class).getHttpConfiguration().setRequestHeaderSize(requestHeaderSize);
+
         if (!host.isEmpty())
             connector0.setHost(host);
 
@@ -120,24 +126,28 @@ public class GHServer
         }
 
         HandlerList handlers = new HandlerList();
-        handlers.setHandlers(new Handler[]
-        {
-            resHandler, servHandler
+        handlers.setHandlers(new Handler[]{
+                resHandler, servHandler
         });
-        server.setHandler(handlers);
+
+        GzipHandler gzipHandler = new GzipHandler();
+        gzipHandler.setIncludedMethods("GET", "POST");
+        // Note: gzip only affects the response body like our previous 'GHGZIPHook' behaviour: http://stackoverflow.com/a/31565805/194609
+        // If no mimeTypes are defined the content-type is "not 'application/gzip'", See also https://github.com/graphhopper/directions-api/issues/28 for pitfalls
+        // gzipHandler.setIncludedMimeTypes();
+        gzipHandler.setHandler(handlers);
+
+        server.setHandler(gzipHandler);
         server.start();
         logger.info("Started server at HTTP " + host + ":" + httpPort);
         if (args.getBool("jetty.useSsl", false))
             logger.info("Started server at HTTPS " + host + ":" + httpsPort);
     }
 
-    protected Module createModule()
-    {
-        return new AbstractModule()
-        {
+    protected Module createModule() {
+        return new AbstractModule() {
             @Override
-            protected void configure()
-            {
+            protected void configure() {
                 binder().requireExplicitBindings();
 
                 install(new DefaultModule(args));
@@ -148,16 +158,13 @@ public class GHServer
         };
     }
 
-    public void stop()
-    {
+    public void stop() {
         if (server == null)
             return;
 
-        try
-        {
+        try {
             server.stop();
-        } catch (Exception ex)
-        {
+        } catch (Exception ex) {
             logger.error("Cannot stop jetty", ex);
         }
     }
