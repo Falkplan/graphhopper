@@ -18,7 +18,7 @@
         </goals>
         <properties>
             <exec.classpathScope>runtime</exec.classpathScope>
-            <exec.args>-classpath %classpath com.graphhopper.GraphHopper config=../config.properties osmreader.osm=./files/moscow.osm.gz</exec.args>
+            <exec.args>-classpath %classpath com.graphhopper.GraphHopper -Xms10G -Xmx10G jetty.resourcebase=webapp jetty.port=80 jetty.usessl=true jetty.keystorepath=/AMAZON/keystore jetty.keystorepass=ietsmakkelijks jetty.keymanagerpass=ietsmakkelijks jetty.truststorepath=/AMAZON/keystore jetty.truststorepass=ietsmakkelijks  config=/Users/stulden/Documents/Temp/falk/Fix october knp/routenl.properties osmreader.osm=/Users/stulden/Documents/Temp/falk/Fix october knp/benedulux_oct.osm.pbf</exec.args>
             <exec.executable>java</exec.executable>
         </properties>
     </action>
@@ -30,7 +30,7 @@
         </goals>
         <properties>
             <exec.classpathScope>runtime</exec.classpathScope>
-            <exec.args>-Xdebug -Xrunjdwp:transport=dt_socket,server=n,address=${jpda.address} -classpath %classpath com.graphhopper.GraphHopper config=../config.properties osmreader.osm=./files/moscow.osm.gz</exec.args>
+            <exec.args>-Xdebug -Xrunjdwp:transport=dt_socket,server=n,address=${jpda.address} -classpath %classpath com.graphhopper.GraphHopper -Xms10G -Xmx10G jetty.resourcebase=webapp jetty.port=80 jetty.usessl=true jetty.keystorepath=/AMAZON/keystore jetty.keystorepass=ietsmakkelijks jetty.keymanagerpass=ietsmakkelijks jetty.truststorepath=/AMAZON/keystore jetty.truststorepass=ietsmakkelijks  config=/Users/stulden/Documents/Temp/falk/Fix october knp/routenl.properties osmreader.osm=/Users/stulden/Documents/Temp/falk/Fix october knp/benedulux_oct.osm.pbf</exec.args>
             <jpda.listen>true</jpda.listen>
             <exec.executable>java</exec.executable>
         </properties>
@@ -42,7 +42,7 @@
             <goal>org.codehaus.mojo:exec-maven-plugin:1.1.1:exec</goal>
         </goals>
         <properties>
-            <exec.args>-classpath %classpath com.graphhopper.GraphHopper config=../config.properties osmreader.osm=./files/moscow.osm.gz</exec.args>
+            <exec.args>-classpath %classpath com.graphhopper.GraphHopper -Xms10G -Xmx10G jetty.resourcebase=webapp jetty.port=80 jetty.usessl=true jetty.keystorepath=/AMAZON/keystore jetty.keystorepass=ietsmakkelijks jetty.keymanagerpass=ietsmakkelijks jetty.truststorepath=/AMAZON/keystore jetty.truststorepass=ietsmakkelijks  config=/Users/stulden/Documents/Temp/falk/Fix october knp/routenl.properties osmreader.osm=/Users/stulden/Documents/Temp/falk/Fix october knp/benedulux_oct.osm.pbf</exec.args>
             <profiler.action>profile</profiler.action>
             <exec.executable>${profiler.java}</exec.executable>
         </properties>
