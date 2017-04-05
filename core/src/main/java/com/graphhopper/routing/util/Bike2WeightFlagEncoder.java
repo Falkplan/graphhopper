@@ -1,15 +1,14 @@
 /*
- *  Licensed to Peter Karich under one or more contributor license
- *  agreements. See the NOTICE file distributed with this work for
+ *  Licensed to GraphHopper GmbH under one or more contributor
+ *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
- *
- *  Peter Karich licenses this file to you under the Apache License,
- *  Version 2.0 (the "License"); you may not use this file except
- *  in compliance with the License. You may obtain a copy of the
- *  License at
- *
+ * 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
+ *  Version 2.0 (the "License"); you may not use this file except in 
+ *  compliance with the License. You may obtain a copy of the License at
+ * 
  *       http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,104 +17,104 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.reader.OSMWay;
+import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.util.BitUtil;
 import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.PMap;
 import com.graphhopper.util.PointList;
-import static com.graphhopper.util.Helper.*;
+
+import static com.graphhopper.util.Helper.keepIn;
 
 /**
  * Stores two speed values into an edge to support avoiding too much incline
  * <p>
+ *
  * @author Peter Karich
  */
-public class Bike2WeightFlagEncoder extends BikeFlagEncoder
-{
-    private EncodedDoubleValue reverseSpeed;
+public class Bike2WeightFlagEncoder extends BikeFlagEncoder {
+    private EncodedDoubleValue reverseSpeedEncoder;
 
-    public Bike2WeightFlagEncoder()
-    {
+    public Bike2WeightFlagEncoder() {
         super();
     }
 
-    public Bike2WeightFlagEncoder( String propertiesStr )
-    {
-        super(propertiesStr);
+    public Bike2WeightFlagEncoder(String propertiesStr) {
+        super(new PMap(propertiesStr));
     }
 
-    public Bike2WeightFlagEncoder( int speedBits, double speedFactor, int maxTurnCosts )
-    {
+    public Bike2WeightFlagEncoder(PMap properties) {
+        super(properties);
+    }
+
+    public Bike2WeightFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
         super(speedBits, speedFactor, maxTurnCosts);
     }
 
     @Override
-    public int defineWayBits( int index, int shift )
-    {
+    public int getVersion() {
+        return 2;
+    }
+
+    @Override
+    public int defineWayBits(int index, int shift) {
         shift = super.defineWayBits(index, shift);
-        reverseSpeed = new EncodedDoubleValue("Reverse Speed", shift, speedBits, speedFactor, 
-                                               getHighwaySpeed("cycleway"), maxPossibleSpeed);
-        shift += reverseSpeed.getBits();
+        reverseSpeedEncoder = new EncodedDoubleValue("Reverse Speed", shift, speedBits, speedFactor,
+                getHighwaySpeed("cycleway"), maxPossibleSpeed);
+        shift += reverseSpeedEncoder.getBits();
         return shift;
     }
 
     @Override
-    public double getReverseSpeed( long flags )
-    {
-        return reverseSpeed.getDoubleValue(flags);
+    public double getReverseSpeed(long flags) {
+        return reverseSpeedEncoder.getDoubleValue(flags);
     }
 
     @Override
-    public long setReverseSpeed( long flags, double speed )
-    {
+    public long setReverseSpeed(long flags, double speed) {
         if (speed < 0)
             throw new IllegalArgumentException("Speed cannot be negative: " + speed + ", flags:" + BitUtil.LITTLE.toBitString(flags));
+
+        if (speed < speedEncoder.factor / 2)
+            return setLowSpeed(flags, speed, true);
 
         if (speed > getMaxSpeed())
             speed = getMaxSpeed();
 
-        return reverseSpeed.setDoubleValue(flags, speed);
+        return reverseSpeedEncoder.setDoubleValue(flags, speed);
     }
 
     @Override
-    public long handleSpeed( OSMWay way, double speed, long encoded )
-    {
+    public long handleSpeed(ReaderWay way, double speed, long flags) {
         // handle oneways
-        if ((way.hasTag("oneway", oneways) || way.hasTag("junction", "roundabout"))
-                && !way.hasTag("oneway:bicycle", "no")
-                && !way.hasTag("cycleway", oppositeLanes))
-        {
+        flags = super.handleSpeed(way, speed, flags);
+        if (isBackward(flags))
+            flags = setReverseSpeed(flags, speed);
 
-            if (way.hasTag("oneway", "-1"))
-            {
-                encoded |= backwardBit;
-                encoded = setReverseSpeed(encoded, speed);
-            } else
-            {
-                encoded |= forwardBit;
-                encoded = setSpeed(encoded, speed);
-            }
-        } else
-        {
-            encoded |= directionBitMask;
-            encoded = setSpeed(encoded, speed);
-            encoded = setReverseSpeed(encoded, speed);
-        }
-        return encoded;
-    }
-
-    @Override
-    public long flagsDefault( boolean forward, boolean backward )
-    {
-        long flags = super.flagsDefault(forward, backward);
-        if (backward)
-            return reverseSpeed.setDefaultValue(flags);
+        if (isForward(flags))
+            flags = setSpeed(flags, speed);
 
         return flags;
     }
 
     @Override
-    public long setProperties( double speed, boolean forward, boolean backward )
-    {
+    protected long setLowSpeed(long flags, double speed, boolean reverse) {
+        if (reverse)
+            return setBool(reverseSpeedEncoder.setDoubleValue(flags, 0), K_BACKWARD, false);
+
+        return setBool(speedEncoder.setDoubleValue(flags, 0), K_FORWARD, false);
+    }
+
+    @Override
+    public long flagsDefault(boolean forward, boolean backward) {
+        long flags = super.flagsDefault(forward, backward);
+        if (backward)
+            return reverseSpeedEncoder.setDefaultValue(flags);
+
+        return flags;
+    }
+
+    @Override
+    public long setProperties(double speed, boolean forward, boolean backward) {
         long flags = super.setProperties(speed, forward, backward);
         if (backward)
             return setReverseSpeed(flags, speed);
@@ -124,32 +123,28 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder
     }
 
     @Override
-    public long reverseFlags( long flags )
-    {
+    public long reverseFlags(long flags) {
         // swap access
         flags = super.reverseFlags(flags);
 
         // swap speeds 
-        double otherValue = reverseSpeed.getDoubleValue(flags);
+        double otherValue = reverseSpeedEncoder.getDoubleValue(flags);
         flags = setReverseSpeed(flags, speedEncoder.getDoubleValue(flags));
         return setSpeed(flags, otherValue);
     }
 
     @Override
-    public void applyWayTags( OSMWay way, EdgeIteratorState edge )
-    {
+    public void applyWayTags(ReaderWay way, EdgeIteratorState edge) {
         PointList pl = edge.fetchWayGeometry(3);
         if (!pl.is3D())
             throw new IllegalStateException("To support speed calculation based on elevation data it is necessary to enable import of it.");
 
         long flags = edge.getFlags();
 
-        if (way.hasTag("tunnel", "yes") || way.hasTag("bridge", "yes") || way.hasTag("highway", "steps"))
-        {
+        if (way.hasTag("tunnel", "yes") || way.hasTag("bridge", "yes") || way.hasTag("highway", "steps")) {
             // do not change speed
             // note: although tunnel can have a difference in elevation it is very unlikely that the elevation data is correct for a tunnel
-        } else
-        {
+        } else {
             // Decrease the speed for ele increase (incline), and decrease the speed for ele decrease (decline). The speed-decrease 
             // has to be bigger (compared to the speed-increase) for the same elevation difference to simulate loosing energy and avoiding hills.
             // For the reverse speed this has to be the opposite but again keeping in mind that up+down difference.
@@ -157,16 +152,20 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder
             double decEleSum = 0, decDist2DSum = 0;
             // double prevLat = pl.getLatitude(0), prevLon = pl.getLongitude(0);
             double prevEle = pl.getElevation(0);
-            double fullDist2D = 0;
+            double fullDist2D = edge.getDistance();
 
-            fullDist2D = edge.getDistance();
+            if (Double.isInfinite(fullDist2D))
+                throw new IllegalStateException("Infinite distance should not happen due to #435. way ID=" + way.getId());
+
+            // for short edges an incline makes no sense and for 0 distances could lead to NaN values for speed, see #432
+            if (fullDist2D < 1)
+                return;
+
             double eleDelta = pl.getElevation(pl.size() - 1) - prevEle;
-            if (eleDelta > 0.1)
-            {
+            if (eleDelta > 0.1) {
                 incEleSum = eleDelta;
                 incDist2DSum = fullDist2D;
-            } else if (eleDelta < -0.1)
-            {
+            } else if (eleDelta < -0.1) {
                 decEleSum = -eleDelta;
                 decDist2DSum = fullDist2D;
             }
@@ -200,9 +199,8 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder
             double fwdDecline = decDist2DSum > 1 ? decEleSum / decDist2DSum : 0;
             double restDist2D = fullDist2D - incDist2DSum - decDist2DSum;
             double maxSpeed = getHighwaySpeed("cycleway");
-            if (isForward(flags))
-            {
-                // use weighted mean so that longer incline infuences speed more than shorter
+            if (isForward(flags)) {
+                // use weighted mean so that longer incline influences speed more than shorter
                 double speed = getSpeed(flags);
                 double fwdFaster = 1 + 2 * keepIn(fwdDecline, 0, 0.2);
                 fwdFaster = fwdFaster * fwdFaster;
@@ -212,8 +210,7 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder
                 flags = this.setSpeed(flags, keepIn(speed, PUSHING_SECTION_SPEED / 2, maxSpeed));
             }
 
-            if (isBackward(flags))
-            {
+            if (isBackward(flags)) {
                 double speedReverse = getReverseSpeed(flags);
                 double bwFaster = 1 + 2 * keepIn(fwdIncline, 0, 0.2);
                 bwFaster = bwFaster * bwFaster;
@@ -227,8 +224,7 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder
     }
 
     @Override
-    public String toString()
-    {
+    public String toString() {
         return "bike2";
     }
 }

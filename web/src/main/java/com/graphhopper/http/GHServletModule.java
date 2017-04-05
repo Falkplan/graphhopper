@@ -1,14 +1,14 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for
+ *  Licensed to GraphHopper GmbH under one or more contributor
+ *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
- *
- *  GraphHopper licenses this file to you under the Apache License,
- *  Version 2.0 (the "License"); you may not use this file except in
+ * 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
+ *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
- *
+ * 
  *       http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,25 +19,26 @@ package com.graphhopper.http;
 
 import com.google.inject.servlet.ServletModule;
 import com.graphhopper.util.CmdArgs;
+
+import javax.inject.Singleton;
 import java.util.HashMap;
 import java.util.Map;
-import javax.inject.Singleton;
 
 /**
  * @author Peter Karich
  */
-public class GHServletModule extends ServletModule
-{
-    protected Map<String, String> params = new HashMap<String, String>();
+public class GHServletModule extends ServletModule {
     protected final CmdArgs args;
+    protected Map<String, String> params = new HashMap<String, String>();
 
-    public GHServletModule( CmdArgs args )
-    {
+    public GHServletModule(CmdArgs args) {
         this.args = args;
         params.put("mimeTypes", "text/html,"
                 + "text/plain,"
                 + "text/xml,"
                 + "application/xhtml+xml,"
+                + "application/gpx+xml,"
+                + "application/xml,"
                 + "text/css,"
                 + "application/json,"
                 + "application/javascript,"
@@ -45,10 +46,9 @@ public class GHServletModule extends ServletModule
     }
 
     @Override
-    protected void configureServlets()
-    {
-        filter("*").through(GHGZIPHook.class, params);
-        bind(GHGZIPHook.class).in(Singleton.class);
+    protected void configureServlets() {
+        filter("*").through(HeadFilter.class);
+        bind(HeadFilter.class).in(Singleton.class);
 
         filter("*").through(CORSFilter.class, params);
         bind(CORSFilter.class).in(Singleton.class);
@@ -64,5 +64,11 @@ public class GHServletModule extends ServletModule
 
         serve("/route*").with(GraphHopperServlet.class);
         bind(GraphHopperServlet.class).in(Singleton.class);
+
+        serve("/nearest*").with(NearestServlet.class);
+        bind(NearestServlet.class).in(Singleton.class);
+
+        serve("/change*").with(ChangeGraphServlet.class);
+        bind(ChangeGraphServlet.class).in(Singleton.class);
     }
 }

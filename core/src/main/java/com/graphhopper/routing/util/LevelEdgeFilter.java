@@ -1,9 +1,9 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
  * 
- *  GraphHopper licenses this file to you under the Apache License, 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
  * 
@@ -17,30 +17,27 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.storage.LevelGraph;
+import com.graphhopper.storage.CHGraph;
+import com.graphhopper.util.CHEdgeIteratorState;
 import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.EdgeSkipIterState;
-import com.graphhopper.util.EdgeSkipIterator;
 
 /**
  * Only certain nodes are accepted and therefor the others are ignored.
- * <p/>
+ * <p>
+ *
  * @author Peter Karich
  */
-public class LevelEdgeFilter implements EdgeFilter
-{
-    private final LevelGraph graph;
+public class LevelEdgeFilter implements EdgeFilter {
+    private final CHGraph graph;
     private final int maxNodes;
 
-    public LevelEdgeFilter( LevelGraph g )
-    {
+    public LevelEdgeFilter(CHGraph g) {
         graph = g;
         maxNodes = g.getNodes();
     }
 
     @Override
-    public boolean accept( EdgeIteratorState edgeIterState )
-    {
+    public boolean accept(EdgeIteratorState edgeIterState) {
         int base = edgeIterState.getBaseNode();
         int adj = edgeIterState.getAdjNode();
         // always accept virtual edges, see #288
@@ -48,7 +45,7 @@ public class LevelEdgeFilter implements EdgeFilter
             return true;
 
         // minor performance improvement: shortcuts in wrong direction are disconnected, so no need to exclude them
-        if (((EdgeSkipIterState) edgeIterState).isShortcut())
+        if (((CHEdgeIteratorState) edgeIterState).isShortcut())
             return true;
 
         return graph.getLevel(base) <= graph.getLevel(adj);

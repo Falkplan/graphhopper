@@ -1,14 +1,14 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
- *
- *  GraphHopper licenses this file to you under the Apache License, 
+ * 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
- *
+ * 
  *       http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,37 +17,58 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.reader.OSMWay;
+import com.graphhopper.reader.ReaderWay;
+import com.graphhopper.routing.weighting.CurvatureWeighting;
+import com.graphhopper.routing.weighting.PriorityWeighting;
 import com.graphhopper.util.BitUtil;
-import static com.graphhopper.routing.util.PriorityCode.*;
+import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.PMap;
+
 import java.util.HashSet;
+
+import static com.graphhopper.routing.util.PriorityCode.BEST;
 
 /**
  * Defines bit layout for motorbikes
  * <p>
+ *
  * @author Peter Karich
+ * @author boldtrn
  */
-public class MotorcycleFlagEncoder extends CarFlagEncoder
-{
-    private EncodedDoubleValue reverseSpeedEncoder;
-    private EncodedValue preferWayEncoder;
+public class MotorcycleFlagEncoder extends CarFlagEncoder {
+    public static final int CURVATURE_KEY = 112;
     private final HashSet<String> avoidSet = new HashSet<String>();
     private final HashSet<String> preferSet = new HashSet<String>();
+    private EncodedDoubleValue reverseSpeedEncoder;
+    private EncodedValue priorityWayEncoder;
+    private EncodedValue curvatureEncoder;
 
-    public MotorcycleFlagEncoder( String propertiesStr )
-    {
-        this((int) parseLong(propertiesStr, "speedBits", 5),
-                parseDouble(propertiesStr, "speedFactor", 5),
-                parseBoolean(propertiesStr, "turnCosts", false) ? 3 : 0);
-        this.setBlockFords(parseBoolean(propertiesStr, "blockFords", true));
+    public MotorcycleFlagEncoder() {
+        this(5, 5, 0);
     }
 
-    public MotorcycleFlagEncoder( int speedBits, double speedFactor, int maxTurnCosts )
-    {
+    public MotorcycleFlagEncoder(PMap properties) {
+        this(
+                (int) properties.getLong("speed_bits", 5),
+                properties.getDouble("speed_factor", 5),
+                properties.getBool("turn_costs", false) ? 1 : 0
+        );
+        this.properties = properties;
+        this.setBlockFords(properties.getBool("block_fords", true));
+    }
+
+    public MotorcycleFlagEncoder(String propertiesStr) {
+        this(new PMap(propertiesStr));
+    }
+
+    public MotorcycleFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
         super(speedBits, speedFactor, maxTurnCosts);
         restrictions.remove("motorcar");
         //  moped, mofa
         restrictions.add("motorcycle");
+
+        absoluteBarriers.remove("bus_trap");
+        absoluteBarriers.remove("sump_buster");
 
         trackTypeSpeedMap.clear();
         defaultSpeedMap.clear();
@@ -61,10 +82,13 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
         avoidSet.add("motorway");
         avoidSet.add("trunk");
         avoidSet.add("motorroad");
+        avoidSet.add("residential");
+
         preferSet.add("primary");
         preferSet.add("secondary");
-        
-        maxPossibleSpeed = 100;
+        preferSet.add("tertiary");
+
+        maxPossibleSpeed = 120;
 
         // autobahn
         defaultSpeedMap.put("motorway", 100);
@@ -91,34 +115,40 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
         defaultSpeedMap.put("road", 20);
         // forestry stuff
         defaultSpeedMap.put("track", 15);
+
+        init();
+    }
+
+    @Override
+    public int getVersion() {
+        return 2;
     }
 
     /**
      * Define the place of the speedBits in the edge flags for car.
      */
     @Override
-    public int defineWayBits( int index, int shift )
-    {
+    public int defineWayBits(int index, int shift) {
         // first two bits are reserved for route handling in superclass
         shift = super.defineWayBits(index, shift);
-        reverseSpeedEncoder = new EncodedDoubleValue("Reverse Speed", shift, speedBits, speedFactor, 
-                                                     defaultSpeedMap.get("secondary"), maxPossibleSpeed);
+        reverseSpeedEncoder = new EncodedDoubleValue("Reverse Speed", shift, speedBits, speedFactor,
+                defaultSpeedMap.get("secondary"), maxPossibleSpeed);
         shift += reverseSpeedEncoder.getBits();
 
-        preferWayEncoder = new EncodedValue("PreferWay", shift, 3, 1, 3, 7);
-        shift += reverseSpeedEncoder.getBits();
+        priorityWayEncoder = new EncodedValue("PreferWay", shift, 3, 1, 3, 7);
+        shift += priorityWayEncoder.getBits();
+
+        curvatureEncoder = new EncodedValue("Curvature", shift, 4, 1, 10, 10);
+        shift += curvatureEncoder.getBits();
 
         return shift;
     }
 
     @Override
-    public long acceptWay( OSMWay way )
-    {
+    public long acceptWay(ReaderWay way) {
         String highwayValue = way.getTag("highway");
-        if (highwayValue == null)
-        {
-            if (way.hasTag("route", ferries))
-            {
+        if (highwayValue == null) {
+            if (way.hasTag("route", ferries)) {
                 String motorcycleTag = way.getTag("motorcycle");
                 if (motorcycleTag == null)
                     motorcycleTag = way.getTag("motor_vehicle");
@@ -129,8 +159,7 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
             return 0;
         }
 
-        if ("track".equals(highwayValue))
-        {
+        if ("track".equals(highwayValue)) {
             String tt = way.getTag("tracktype");
             if (tt != null && !tt.equals("grade1"))
                 return 0;
@@ -142,36 +171,34 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
         if (way.hasTag("impassable", "yes") || way.hasTag("status", "impassable"))
             return 0;
 
+        String firstValue = way.getFirstPriorityTag(restrictions);
+        if (!firstValue.isEmpty()) {
+            if (restrictedValues.contains(firstValue) && !getConditionalTagInspector().isRestrictedWayConditionallyPermitted(way))
+                return 0;
+            if (intendedValues.contains(firstValue))
+                return acceptBit;
+        }
+
         // do not drive street cars into fords
-        boolean carsAllowed = way.hasTag(restrictions, intendedValues);
-        if (isBlockFords() && ("ford".equals(highwayValue) || way.hasTag("ford")) && !carsAllowed)
+        if (isBlockFords() && ("ford".equals(highwayValue) || way.hasTag("ford")))
             return 0;
 
-        // check access restrictions
-        if (way.hasTag(restrictions, restrictedValues) && !carsAllowed)
+        if (getConditionalTagInspector().isPermittedWayConditionallyRestricted(way))
             return 0;
-
-        // do not drive cars over railways (sometimes incorrectly mapped!)
-        if (way.hasTag("railway") && !way.hasTag("railway", acceptedRailways))
-            return 0;
-
-        return acceptBit;
+        else
+            return acceptBit;
     }
 
     @Override
-    public long handleWayTags( OSMWay way, long allowed, long relationFlags )
-    {
+    public long handleWayTags(ReaderWay way, long allowed, long priorityFromRelation) {
         if (!isAccept(allowed))
             return 0;
 
-        long encoded = 0;
-        if (!isFerry(allowed))
-        {
-            encoded = setLong(encoded, PriorityWeighting.KEY, calcPriority(way, relationFlags));
-
+        long flags = 0;
+        if (!isFerry(allowed)) {
             // get assumed speed from highway type
             double speed = getSpeed(way);
-            speed = applyMaxSpeed(way, speed, true);
+            speed = applyMaxSpeed(way, speed);
 
             double maxMCSpeed = parseSpeed(way.getTag("maxspeed:motorcycle"));
             if (maxMCSpeed > 0 && maxMCSpeed < speed)
@@ -183,46 +210,50 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
 
             boolean isRoundabout = way.hasTag("junction", "roundabout");
             if (isRoundabout)
-                encoded = setBool(0, K_ROUNDABOUT, true);
+                flags = setBool(0, K_ROUNDABOUT, true);
 
-            if (way.hasTag("oneway", oneways) || isRoundabout)
-            {
-                if (way.hasTag("oneway", "-1"))
-                {
-                    encoded = setReverseSpeed(encoded, speed);
-                    encoded |= backwardBit;
-                } else
-                {
-                    encoded = setSpeed(encoded, speed);
-                    encoded |= forwardBit;
+            if (way.hasTag("oneway", oneways) || isRoundabout) {
+                if (way.hasTag("oneway", "-1")) {
+                    flags = setReverseSpeed(flags, speed);
+                    flags |= backwardBit;
+                } else {
+                    flags = setSpeed(flags, speed);
+                    flags |= forwardBit;
                 }
-            } else
-            {
-                encoded = setSpeed(encoded, speed);
-                encoded = setReverseSpeed(encoded, speed);
-                encoded |= directionBitMask;
+            } else {
+                flags = setSpeed(flags, speed);
+                flags = setReverseSpeed(flags, speed);
+                flags |= directionBitMask;
             }
 
-        } else
-        {
-            encoded = handleFerryTags(way, defaultSpeedMap.get("living_street"), defaultSpeedMap.get("service"), defaultSpeedMap.get("residential"));
-            encoded |= directionBitMask;
+        } else {
+            double ferrySpeed = getFerrySpeed(way, defaultSpeedMap.get("living_street"), defaultSpeedMap.get("service"), defaultSpeedMap.get("residential"));
+            flags = setSpeed(flags, ferrySpeed);
+            flags = setReverseSpeed(flags, ferrySpeed);
+            flags |= directionBitMask;
         }
 
-        return encoded;
+        // relations are not yet stored -> see BikeCommonFlagEncoder.defineRelationBits how to do this
+        flags = priorityWayEncoder.setValue(flags, handlePriority(way, priorityFromRelation));
+
+        // Set the curvature to the Maximum
+        flags = curvatureEncoder.setValue(flags, 10);
+
+        return flags;
     }
 
     @Override
-    public double getReverseSpeed( long flags )
-    {
+    public double getReverseSpeed(long flags) {
         return reverseSpeedEncoder.getDoubleValue(flags);
     }
 
     @Override
-    public long setReverseSpeed( long flags, double speed )
-    {
+    public long setReverseSpeed(long flags, double speed) {
         if (speed < 0)
             throw new IllegalArgumentException("Speed cannot be negative: " + speed + ", flags:" + BitUtil.LITTLE.toBitString(flags));
+
+        if (speed < speedEncoder.factor / 2)
+            return setLowSpeed(flags, speed, true);
 
         if (speed > getMaxSpeed())
             speed = getMaxSpeed();
@@ -231,8 +262,15 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
     }
 
     @Override
-    public long flagsDefault( boolean forward, boolean backward )
-    {
+    protected long setLowSpeed(long flags, double speed, boolean reverse) {
+        if (reverse)
+            return setBool(reverseSpeedEncoder.setDoubleValue(flags, 0), K_BACKWARD, false);
+
+        return setBool(speedEncoder.setDoubleValue(flags, 0), K_FORWARD, false);
+    }
+
+    @Override
+    public long flagsDefault(boolean forward, boolean backward) {
         long flags = super.flagsDefault(forward, backward);
         if (backward)
             return reverseSpeedEncoder.setDefaultValue(flags);
@@ -241,8 +279,7 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
     }
 
     @Override
-    public long setProperties( double speed, boolean forward, boolean backward )
-    {
+    public long setProperties(double speed, boolean forward, boolean backward) {
         long flags = super.setProperties(speed, forward, backward);
         if (backward)
             return setReverseSpeed(flags, speed);
@@ -251,8 +288,7 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
     }
 
     @Override
-    public long reverseFlags( long flags )
-    {
+    public long reverseFlags(long flags) {
         // swap access
         flags = super.reverseFlags(flags);
 
@@ -263,70 +299,96 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder
     }
 
     @Override
-    public double getDouble( long flags, int key )
-    {
-        switch (key)
-        {
+    public double getDouble(long flags, int key) {
+        switch (key) {
             case PriorityWeighting.KEY:
-                double prio = preferWayEncoder.getValue(flags);
-                if (prio == 0)
-                    return (double) UNCHANGED.getValue() / BEST.getValue();
-
-                return prio / BEST.getValue();
+                return (double) priorityWayEncoder.getValue(flags) / BEST.getValue();
+            case MotorcycleFlagEncoder.CURVATURE_KEY:
+                return (double) curvatureEncoder.getValue(flags) / 10;
             default:
                 return super.getDouble(flags, key);
         }
     }
 
-    @Override
-    public long getLong( long flags, int key )
-    {
-        switch (key)
-        {
-            case PriorityWeighting.KEY:
-                return preferWayEncoder.getValue(flags);
-            default:
-                return super.getLong(flags, key);
-        }
-    }
-
-    @Override
-    public long setLong( long flags, int key, long value )
-    {
-        switch (key)
-        {
-            case PriorityWeighting.KEY:
-                return preferWayEncoder.setValue(flags, value);
-            default:
-                return super.setLong(flags, key, value);
-        }
-    }
-
-    private int calcPriority( OSMWay way, long relationFlags )
-    {
+    private int handlePriority(ReaderWay way, long relationFlags) {
         String highway = way.getTag("highway", "");
-        if (avoidSet.contains(highway))
-        {
-            return PriorityCode.AVOID_AT_ALL_COSTS.getValue();
-        } else if (preferSet.contains(highway))
-        {
-            return PriorityCode.VERY_NICE.getValue();
+        if (avoidSet.contains(highway)) {
+            return PriorityCode.WORST.getValue();
+        } else if (preferSet.contains(highway)) {
+            return PriorityCode.BEST.getValue();
         }
+
         return PriorityCode.UNCHANGED.getValue();
     }
 
     @Override
-    public boolean supports( Class<?> feature )
-    {
+    public void applyWayTags(ReaderWay way, EdgeIteratorState edge) {
+        double speed = this.getSpeed(edge.getFlags());
+        double roadDistance = edge.getDistance();
+        double beelineDistance = getBeelineDistance(way);
+        double bendiness = beelineDistance / roadDistance;
+
+        bendiness = discriminateSlowStreets(bendiness, speed);
+        bendiness = increaseBendinessImpact(bendiness);
+        bendiness = correctErrors(bendiness);
+
+        edge.setFlags(this.curvatureEncoder.setValue(edge.getFlags(), convertToInt(bendiness)));
+    }
+
+    private double getBeelineDistance(ReaderWay way) {
+        return way.getTag("estimated_distance", Double.POSITIVE_INFINITY);
+    }
+
+    /**
+     * Streets that slow are not fun and probably in a town.
+     */
+    protected double discriminateSlowStreets(double bendiness, double speed) {
+        if (speed < 51) {
+            return 1;
+        }
+        return bendiness;
+    }
+
+    /**
+     * A really small bendiness or a bendiness greater than 1 indicates an error in the calculation.
+     * Just ignore them. We use bendiness greater 1.2 since the beelineDistance is only
+     * approximated, therefore it can happen on straight roads, that the beeline is longer than the
+     * road.
+     */
+    protected double correctErrors(double bendiness) {
+        if (bendiness < 0.01 || bendiness > 1) {
+            return 1;
+        }
+        return bendiness;
+    }
+
+    /**
+     * A good bendiness should become a greater impact. A bendiness close to 1 should not be
+     * changed.
+     */
+    protected double increaseBendinessImpact(double bendiness) {
+        return (Math.pow(bendiness, 2));
+    }
+
+    @Override
+    public boolean supports(Class<?> feature) {
         if (super.supports(feature))
             return true;
+
+        if (CurvatureWeighting.class.isAssignableFrom(feature)) {
+            return true;
+        }
 
         return PriorityWeighting.class.isAssignableFrom(feature);
     }
 
+    protected int convertToInt(double bendiness) {
+        bendiness = bendiness * 10;
+        return (int) bendiness;
+    }
+
     @Override
-    public String toString()
-    {
+    public String toString() {
         return "motorcycle";
     }
 }

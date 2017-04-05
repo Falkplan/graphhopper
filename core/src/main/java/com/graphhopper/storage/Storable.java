@@ -1,9 +1,9 @@
 /*
- *  Licensed to GraphHopper and Peter Karich under one or more contributor
+ *  Licensed to GraphHopper GmbH under one or more contributor
  *  license agreements. See the NOTICE file distributed with this work for 
  *  additional information regarding copyright ownership.
  * 
- *  GraphHopper licenses this file to you under the Apache License, 
+ *  GraphHopper GmbH licenses this file to you under the Apache License, 
  *  Version 2.0 (the "License"); you may not use this file except in 
  *  compliance with the License. You may obtain a copy of the License at
  * 
@@ -22,7 +22,7 @@ import java.io.Closeable;
 /**
  * Interface for a storage abstraction. Currently is serves just the purpose to ensure the same
  * methods and names through all kind of 'storable' things in graphhopper.
- * <p/>
+ * <p>
  * Then the lifecycle is identical for all such objects:
  * <ol>
  * <li>object creation via new</li>
@@ -33,11 +33,11 @@ import java.io.Closeable;
  * could require a call to increase memory while usage. E.g. DataAccess.ensureCapacity()</li>
  * <li>Finally do close() which does no flush()</li>
  * </ol>
- * <p/>
+ * <p>
+ *
  * @author Peter Karich
  */
-public interface Storable<T> extends Closeable
-{
+public interface Storable<T> extends Closeable {
     /**
      * @return true if successfully loaded from persistent storage.
      */
@@ -46,7 +46,7 @@ public interface Storable<T> extends Closeable
     /**
      * Creates the underlying storage. First operation if it cannot be loaded.
      */
-    T create( long byteCount );
+    T create(long byteCount);
 
     /**
      * This method makes sure that the underlying data is written to the storage. Keep in mind that

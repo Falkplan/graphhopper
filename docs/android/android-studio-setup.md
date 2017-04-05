@@ -4,7 +4,7 @@ Get the [GraphHopper sources and demo](./index.md) before you proceed.
 
 ## Setup
 
-[Download](http://developer.android.com/sdk/index.html) and start android studio
+[Download](http://developer.android.com/sdk/index.html) and start android studio. 
 
 Open existing Android studio project and then open 'graphhopper/android' not the parent 'graphhopper'
 
