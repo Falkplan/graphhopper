@@ -17,7 +17,6 @@
  */
 package com.graphhopper.http;
 
-import com.graphhopper.GraphHopper;
 import com.graphhopper.routing.util.EdgeFilter;
 import com.graphhopper.storage.index.LocationIndex;
 import com.graphhopper.storage.index.QueryResult;
@@ -29,6 +28,7 @@ import java.io.IOException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -43,7 +43,10 @@ import org.json.JSONObject;
 public class NearestServlet extends GHBaseServlet {
     private final DistanceCalc calc = Helper.DIST_EARTH;
     @Inject
-    private GraphHopper hopper;
+    private LocationIndex index;
+    @Inject
+    @Named("hasElevation")
+    private boolean hasElevation;
 
     @Override
     public void doGet(HttpServletRequest httpReq, HttpServletResponse httpRes) throws ServletException, IOException {
@@ -53,7 +56,6 @@ public class NearestServlet extends GHBaseServlet {
         JSONObject result = new JSONObject();
         if (pointStr != null && !pointStr.equalsIgnoreCase("")) {
             GHPoint place = GHPoint.parse(pointStr);
-            LocationIndex index = hopper.getLocationIndex();
             QueryResult qr = index.findClosest(place.lat, place.lon, EdgeFilter.ALL_EDGES);
 
             if (!qr.isValid()) {
@@ -66,7 +68,7 @@ public class NearestServlet extends GHBaseServlet {
                 coord.put(snappedPoint.lon);
                 coord.put(snappedPoint.lat);
 
-                if (hopper.hasElevation() && enabledElevation)
+                if (hasElevation && enabledElevation)
                     coord.put(snappedPoint.ele);
 
                 result.put("coordinates", coord);
