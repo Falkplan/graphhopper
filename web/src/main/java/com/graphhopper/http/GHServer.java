@@ -26,25 +26,24 @@ import com.graphhopper.util.CmdArgs;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHolder;
 import java.util.EnumSet;
+import javax.net.ssl.SSLParameters;
 import javax.servlet.DispatcherType;
+import org.eclipse.jetty.http.HttpVersion;
+
 import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
-import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.server.handler.ResourceHandler;
-import org.eclipse.jetty.server.nio.SelectChannelConnector;
-import org.eclipse.jetty.server.ssl.SslSelectChannelConnector;
 import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.server.handler.gzip.GzipHandler;
-import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.servlet.DispatcherType;
-import java.util.EnumSet;
 
 /**
  * Simple server similar to integration tests setup.
@@ -88,12 +87,11 @@ public class GHServer {
 
         ServerConnector connector0 = new ServerConnector(server);
         int httpPort = args.getInt("jetty.port", 8989);
-        int httpsPort = args.getInt("jetty.sslPort", 443);
+        int httpsPort = args.getInt("jetty.sslport", 443);
         String host = args.get("jetty.host", "");
-        connector0.setRequestHeaderSize(16192);
         connector0.setPort(httpPort);
 
-        int requestHeaderSize = args.getInt("jetty.request_header_size", -1);
+        int requestHeaderSize = 16192;//args.getInt("jetty.request_header_size", -1);
         if (requestHeaderSize > 0)
             connector0.getConnectionFactory(HttpConnectionFactory.class).getHttpConfiguration().setRequestHeaderSize(requestHeaderSize);
 
@@ -103,22 +101,32 @@ public class GHServer {
         server.addConnector(connector0);
         
         // SSL
-        if (args.getBool("jetty.useSsl", false) 
-                && args.get("jetty.keystorePath", null) != null 
-                && args.get("jetty.keystorePass", null) != null 
-                && args.get("jetty.keymanagerPass", null) != null 
-                && args.get("jetty.truststorePath", null) != null
-                && args.get("jetty.truststorePass", null) != null) {
+        if (args.getBool("jetty.usessl", false) 
+                && args.get("jetty.keystorepath", null) != null 
+                && args.get("jetty.keystorepass", null) != null 
+                && args.get("jetty.keymanagerpass", null) != null 
+                && args.get("jetty.truststorepath", null) != null
+                && args.get("jetty.truststorepass", null) != null) {                        
             SslContextFactory sslFactory = new SslContextFactory();
-            sslFactory.setKeyStorePath(args.get("jetty.keystorePath", ""));
-            sslFactory.setKeyStorePassword(args.get("jetty.keystorePass", ""));
-            sslFactory.setKeyManagerPassword(args.get("jetty.keymanagerPass", ""));
-            sslFactory.setTrustStore(args.get("jetty.truststorePath", ""));
-            sslFactory.setTrustStorePassword(args.get("jetty.truststorePass", ""));
+            sslFactory.setKeyStorePath(args.get("jetty.keystorepath", ""));
+            sslFactory.setKeyStorePassword(args.get("jetty.keystorepass", ""));
+            sslFactory.setKeyManagerPassword(args.get("jetty.keymanagerpass", ""));
+            sslFactory.setTrustStorePath(args.get("jetty.truststorepath", ""));
+            sslFactory.setTrustStorePassword(args.get("jetty.truststorepass", ""));
+            
+            HttpConfiguration https_config = new HttpConfiguration();
+            https_config.setSecureScheme("https");
+            https_config.setSecurePort(httpsPort);
+            https_config.setRequestHeaderSize(requestHeaderSize);
+            
+            SecureRequestCustomizer src = new SecureRequestCustomizer();
+            src.setStsMaxAge(2000);
+            src.setStsIncludeSubDomains(true);
+            https_config.addCustomizer(src);
 
-            SslSelectChannelConnector connector1 = new SslSelectChannelConnector(sslFactory);
-            connector1.setPort(httpsPort);      
-            connector1.setRequestHeaderSize(16192);
+            ServerConnector connector1 = new ServerConnector(server,
+            new SslConnectionFactory(sslFactory,HttpVersion.HTTP_1_1.asString()), new HttpConnectionFactory(https_config));
+            connector1.setPort(httpsPort);   
             if (!host.isEmpty())
                 connector1.setHost(host);
 
@@ -140,7 +148,7 @@ public class GHServer {
         server.setHandler(gzipHandler);
         server.start();
         logger.info("Started server at HTTP " + host + ":" + httpPort);
-        if (args.getBool("jetty.useSsl", false))
+        if (args.getBool("jetty.usessl", false) == true)
             logger.info("Started server at HTTPS " + host + ":" + httpsPort);
     }
 

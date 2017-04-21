@@ -28,7 +28,7 @@
             <goal>org.codehaus.mojo:exec-maven-plugin:1.2.1:exec</goal>
         </goals>
         <properties>
-            <exec.args>-Xms1G -Xmx1G -classpath %classpath com.graphhopper.http.GHServer jetty.port=8989 config=/Users/stulden/Documents/Temp/falk/routenl.properties osmreader.osm=/Users/stulden/Documents/Temp/falk/Fix_october_knp/benedulux_oct.osm.pbf</exec.args>
+            <exec.args>-Xms5G -Xmx5G -classpath %classpath com.graphhopper.http.GHServer jetty.port=80 jetty.useSsl=true jetty.keystorePath=/AMAZON/keystore jetty.keystorePass=ietsmakkelijks jetty.keymanagerPass=ietsmakkelijks jetty.truststorePath=/AMAZON/keystore jetty.truststorePass=ietsmakkelijks config=/Users/stulden/Documents/Temp/falk/routenl_bike_ele.properties datareader.file=/Users/stulden/Documents/Temp/falk/benedulux_march_2017.osm.pbf</exec.args>
             <exec.executable>java</exec.executable>
         </properties>
     </action>
@@ -42,7 +42,7 @@
             <goal>org.codehaus.mojo:exec-maven-plugin:1.2.1:exec</goal>
         </goals>
         <properties>
-            <exec.args>-Xdebug -Xrunjdwp:transport=dt_socket,server=n,address=${jpda.address} -Xms1G -Xmx1G -classpath %classpath com.graphhopper.http.GHServer jetty.port=8989 config=/Users/stulden/Documents/Temp/falk/routenl.properties osmreader.osm=/Users/stulden/Documents/Temp/falk/Fix_october_knp/benedulux_oct.osm.pbf</exec.args>
+            <exec.args>-Xdebug -Xrunjdwp:transport=dt_socket,server=n,address=${jpda.address} -Xms5G -Xmx5G -classpath %classpath com.graphhopper.http.GHServer jetty.port=80 jetty.useSsl=true jetty.keystorePath=/AMAZON/keystore jetty.keystorePass=ietsmakkelijks jetty.keymanagerPass=ietsmakkelijks jetty.truststorePath=/AMAZON/keystore jetty.truststorePass=ietsmakkelijks config=/Users/stulden/Documents/Temp/falk/routenl_bike_ele.properties datareader.file=/Users/stulden/Documents/Temp/falk/benedulux_march_2017.osm.pbf</exec.args>
             <exec.executable>java</exec.executable>
             <jpda.listen>true</jpda.listen>
         </properties>
@@ -57,7 +57,7 @@
             <goal>org.codehaus.mojo:exec-maven-plugin:1.2.1:exec</goal>
         </goals>
         <properties>
-            <exec.args>-Xms1G -Xmx1G -classpath %classpath com.graphhopper.http.GHServer jetty.port=8989 config=/Users/stulden/Documents/Temp/falk/routenl.properties osmreader.osm=/Users/stulden/Documents/Temp/falk/Fix_october_knp/benedulux_oct.osm.pbf</exec.args>
+            <exec.args>-Xms5G -Xmx5G -classpath %classpath com.graphhopper.http.GHServer jetty.port=80 jetty.useSsl=true jetty.keystorePath=/AMAZON/keystore jetty.keystorePass=ietsmakkelijks jetty.keymanagerPass=ietsmakkelijks jetty.truststorePath=/AMAZON/keystore jetty.truststorePass=ietsmakkelijks config=/Users/stulden/Documents/Temp/falk/routenl_bike_ele.properties datareader.file=/Users/stulden/Documents/Temp/falk/benedulux_march_2017.osm.pbf</exec.args>
             <exec.executable>java</exec.executable>
         </properties>
     </action>
