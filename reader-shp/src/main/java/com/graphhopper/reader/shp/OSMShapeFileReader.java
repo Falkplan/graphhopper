@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -42,6 +42,8 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 
+import static com.graphhopper.util.Helper.*;
+
 /**
  * OSMShapeFileReader for files present at : http://download.geofabrik.de/ It
  * extracts the data as per the structure of shape files
@@ -56,10 +58,11 @@ public class OSMShapeFileReader extends ShapeFileReader {
     private static final String[] DIRECT_COPY_TAGS = new String[]{"name"};
     private File roadsFile;
     private final GHObjectIntHashMap<Coordinate> coordState = new GHObjectIntHashMap<>(1000, 0.7f);
-    private final DistanceCalc distCalc = Helper.DIST_EARTH;
+    private final DistanceCalc distCalc = DIST_EARTH;
     private static final Logger LOGGER = LoggerFactory.getLogger(OSMShapeFileReader.class);
     private final HashSet<EdgeAddedListener> edgeAddedListeners = new HashSet<>();
     private int nextNodeId = FIRST_NODE_ID;
+    private final String encoding = "utf8";
 
     public OSMShapeFileReader(GraphHopperStorage ghStorage) {
         super(ghStorage);
@@ -90,7 +93,7 @@ public class OSMShapeFileReader extends ShapeFileReader {
         FeatureIterator<SimpleFeature> roads = null;
 
         try {
-            dataStore = openShapefileDataStore(roadsFile);
+            dataStore = openShapefileDataStore(roadsFile, encoding);
             roads = getFeatureIterator(dataStore);
 
             HashSet<Coordinate> tmpSet = new HashSet<>();
@@ -152,7 +155,7 @@ public class OSMShapeFileReader extends ShapeFileReader {
         FeatureIterator<SimpleFeature> roads = null;
 
         try {
-            dataStore = openShapefileDataStore(roadsFile);
+            dataStore = openShapefileDataStore(roadsFile, encoding);
             roads = getFeatureIterator(dataStore);
 
             while (roads.hasNext()) {
@@ -246,6 +249,12 @@ public class OSMShapeFileReader extends ShapeFileReader {
     }
 
     @Override
+    public DataReader setSmoothElevation(boolean smoothElevation) {
+        // TODO implement elevation smoothing for shape files
+        return this;
+    }
+
+    @Override
     public Date getDataDate() {
         return null;
     }
@@ -298,7 +307,7 @@ public class OSMShapeFileReader extends ShapeFileReader {
             // shapefile.
             // We map back to the standard convention so that tag can be dealt
             // with correctly by the flag encoder.
-            String val = oneway.toString().trim().toLowerCase();
+            String val = toLowerCase(oneway.toString().trim());
             if (val.equals("b")) {
                 // both ways
                 val = "no";

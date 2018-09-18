@@ -39,7 +39,6 @@ import org.oscim.android.MapView;
 import org.oscim.android.canvas.AndroidGraphics;
 import org.oscim.backend.canvas.Bitmap;
 import org.oscim.core.GeoPoint;
-import org.oscim.core.Tile;
 import org.oscim.event.Gesture;
 import org.oscim.event.GestureListener;
 import org.oscim.event.MotionEvent;
@@ -119,7 +118,6 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
-        Tile.SIZE = Tile.calculateTileSize(getResources().getDisplayMetrics().scaledDensity);
         mapView = new MapView(this);
 
         final EditText input = new EditText(this);
@@ -407,6 +405,7 @@ public class MainActivity extends Activity {
 
     private PathLayer createPathLayer(PathWrapper response) {
         Style style = Style.builder()
+                .fixed(true)
                 .generalization(Style.GENERALIZATION_SMALL)
                 .strokeColor(0x9900cc33)
                 .strokeWidth(4 * getResources().getDisplayMetrics().density)

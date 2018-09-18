@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -47,14 +47,14 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
     protected final static int K_FORWARD = 0, K_BACKWARD = 1;
     private final static Logger logger = LoggerFactory.getLogger(AbstractFlagEncoder.class);
     /* restriction definitions where order is important */
-    protected final List<String> restrictions = new ArrayList<String>(5);
-    protected final Set<String> intendedValues = new HashSet<String>(5);
-    protected final Set<String> restrictedValues = new HashSet<String>(5);
-    protected final Set<String> ferries = new HashSet<String>(5);
-    protected final Set<String> oneways = new HashSet<String>(5);
+    protected final List<String> restrictions = new ArrayList<>(5);
+    protected final Set<String> intendedValues = new HashSet<>(5);
+    protected final Set<String> restrictedValues = new HashSet<>(5);
+    protected final Set<String> ferries = new HashSet<>(5);
+    protected final Set<String> oneways = new HashSet<>(5);
     // http://wiki.openstreetmap.org/wiki/Mapfeatures#Barrier
-    protected final Set<String> absoluteBarriers = new HashSet<String>(5);
-    protected final Set<String> potentialBarriers = new HashSet<String>(5);
+    protected final Set<String> absoluteBarriers = new HashSet<>(5);
+    protected final Set<String> potentialBarriers = new HashSet<>(5);
     protected final int speedBits;
     protected final double speedFactor;
     private final int maxTurnCosts;
@@ -70,9 +70,6 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
     // This value determines the maximal possible speed of any road regardless the maxspeed value
     // lower values allow more compact representation of the routing graph
     protected int maxPossibleSpeed;
-    /* processing properties (to be initialized lazy when needed) */
-    protected EdgeExplorer edgeOutExplorer;
-    protected EdgeExplorer edgeInExplorer;
     /* Edge Flag Encoder fields */
     private long nodeBitMask;
     private long wayBitMask;
@@ -82,6 +79,11 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
     private boolean blockByDefault = true;
     private boolean blockFords = true;
     private boolean registered;
+
+    // Speeds from CarFlagEncoder
+    protected static final double UNKNOWN_DURATION_FERRY_SPEED = 5;
+    protected static final double SHORT_TRIP_FERRY_SPEED = 20;
+    protected static final double LONG_TRIP_FERRY_SPEED = 30;
 
     private ConditionalTagInspector conditionalTagInspector;
 
@@ -438,8 +440,9 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
     /**
      * Special handling for ferry ways.
      */
-    protected double getFerrySpeed(ReaderWay way, double unknownSpeed, double shortTripsSpeed, double longTripsSpeed) {
+    protected double getFerrySpeed(ReaderWay way) {
         long duration = 0;
+
         try {
             // During the reader process we have converted the duration value into a artificial tag called "duration:seconds".
             duration = Long.parseLong(way.getTag("duration:seconds"));
@@ -447,30 +450,27 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
         }
         // seconds to hours
         double durationInHours = duration / 60d / 60d;
+        // Check if our graphhopper specific artificially created estimated_distance way tag is present
+        Number estimatedLength = way.getTag("estimated_distance", null);
         if (durationInHours > 0)
             try {
-                // Check if our graphhopper specific artificially created estimated_distance way tag is present
-                Number estimatedLength = way.getTag("estimated_distance", null);
                 if (estimatedLength != null) {
-                    // to km
-                    double val = estimatedLength.doubleValue() / 1000;
+                    double estimatedLengthInKm = estimatedLength.doubleValue() / 1000;
                     // If duration AND distance is available we can calculate the speed more precisely
                     // and set both speed to the same value. Factor 1.4 slower because of waiting time!
-                    double calculatedTripSpeed = val / durationInHours / 1.4;
+                    double calculatedTripSpeed = estimatedLengthInKm / durationInHours / 1.4;
                     // Plausibility check especially for the case of wrongly used PxM format with the intention to
                     // specify the duration in minutes, but actually using months
                     if (calculatedTripSpeed > 0.01d) {
-                        // If we have a very short ferry with an average lower compared to what we can encode 
-                        // then we need to avoid setting it as otherwise the edge would not be found at all any more.
-                        if (Math.round(calculatedTripSpeed) > speedEncoder.factor / 2) {
-                            shortTripsSpeed = Math.round(calculatedTripSpeed);
-                            if (shortTripsSpeed > getMaxSpeed())
-                                shortTripsSpeed = getMaxSpeed();
-                            longTripsSpeed = shortTripsSpeed;
-                        } else {
-                            // Now we set to the lowest possible still accessible speed. 
-                            shortTripsSpeed = speedEncoder.factor / 2;
+                        if (calculatedTripSpeed > getMaxSpeed()) {
+                            return getMaxSpeed();
                         }
+                        // If the speed is lower than the speed we can store, we have to set it to the minSpeed, but > 0
+                        if (Math.round(calculatedTripSpeed) < speedEncoder.factor / 2) {
+                            return speedEncoder.factor / 2;
+                        }
+
+                        return Math.round(calculatedTripSpeed);
                     } else {
                         long lastId = way.getNodes().isEmpty() ? -1 : way.getNodes().get(way.getNodes().size() - 1);
                         long firstId = way.getNodes().isEmpty() ? -1 : way.getNodes().get(0);
@@ -484,13 +484,15 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
             }
 
         if (durationInHours == 0) {
+            if(estimatedLength != null && estimatedLength.doubleValue() <= 300)
+                return speedEncoder.factor / 2;
             // unknown speed -> put penalty on ferry transport
-            return unknownSpeed;
+            return UNKNOWN_DURATION_FERRY_SPEED;
         } else if (durationInHours > 1) {
             // lengthy ferries should be faster than short trip ferry
-            return longTripsSpeed;
+            return LONG_TRIP_FERRY_SPEED;
         } else {
-            return shortTripsSpeed;
+            return SHORT_TRIP_FERRY_SPEED;
         }
     }
 
@@ -594,7 +596,7 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
             if (costs != 0 || Double.isInfinite(costs))
                 throw new IllegalArgumentException("Restricted turn can only have infinite costs (or use 0)");
         } else if (costs >= maxTurnCosts)
-            throw new IllegalArgumentException("Cost is too high. Or specifiy restricted == true");
+            throw new IllegalArgumentException("Cost is too high. Or specify restricted == true");
 
         if (costs < 0)
             throw new IllegalArgumentException("Turn costs cannot be negative");
@@ -671,13 +673,13 @@ public abstract class AbstractFlagEncoder implements FlagEncoder, TurnCostEncode
     }
 
     /**
-     * @param way:   needed to retrieve tags
-     * @param speed: speed guessed e.g. from the road type or other tags
+     * @param way   needed to retrieve tags
+     * @param speed speed guessed e.g. from the road type or other tags
      * @return The assumed speed.
      */
     protected double applyMaxSpeed(ReaderWay way, double speed) {
         double maxSpeed = getMaxSpeed(way);
-        // We obay speed limits
+        // We obey speed limits
         if (maxSpeed >= 0) {
             // We assume that the average speed is 90% of the allowed maximum
             return maxSpeed * 0.9;

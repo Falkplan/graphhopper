@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,7 +26,6 @@ import com.graphhopper.reader.DataReader;
 import com.graphhopper.routing.*;
 import com.graphhopper.routing.ch.CHAlgoFactoryDecorator;
 import com.graphhopper.routing.ch.PrepareContractionHierarchies;
-import com.graphhopper.routing.lm.LandmarkStorage;
 import com.graphhopper.routing.lm.PrepareLandmarks;
 import com.graphhopper.routing.util.*;
 import com.graphhopper.routing.weighting.AbstractWeighting;
@@ -237,7 +236,7 @@ public class GraphHopperOSMTest {
                 setEncodingManager(new EncodingManager("car")).
                 setGraphHopperLocation(ghLoc).
                 setDataReaderFile(testOsm);
-        final AtomicReference<Exception> ar = new AtomicReference<Exception>();
+        final AtomicReference<Exception> ar = new AtomicReference<>();
         Thread thread = new Thread() {
             @Override
             public void run() {
@@ -327,7 +326,7 @@ public class GraphHopperOSMTest {
         instance.importOrLoad();
 
         assertEquals(5, instance.getGraphHopperStorage().getNodes());
-        assertEquals(8, instance.getGraphHopperStorage().getAllEdges().getMaxId());
+        assertEquals(8, instance.getGraphHopperStorage().getAllEdges().length());
 
         // A to D
         GHResponse grsp = instance.route(new GHRequest(11.1, 50, 11.3, 51).setVehicle("car"));
@@ -523,7 +522,7 @@ public class GraphHopperOSMTest {
         instance.importOrLoad();
 
         assertEquals(2, instance.getGraphHopperStorage().getNodes());
-        assertEquals(2, instance.getGraphHopperStorage().getAllEdges().getMaxId());
+        assertEquals(2, instance.getGraphHopperStorage().getAllEdges().length());
 
         // A to E only for foot
         GHResponse grsp = instance.route(new GHRequest(11.1, 50, 11.19, 52).setVehicle("foot"));
@@ -558,7 +557,7 @@ public class GraphHopperOSMTest {
         assertFalse("should find 1->2->3", grsp.hasErrors());
         PathWrapper rsp = grsp.getBest();
         assertEquals(rsp12.getBest().getDistance() + rsp23.getBest().getDistance(), rsp.getDistance(), 1e-6);
-        assertEquals(5, rsp.getPoints().getSize());
+        assertEquals(4, rsp.getPoints().getSize());
         assertEquals(5, rsp.getInstructions().size());
         assertEquals(Instruction.REACHED_VIA, rsp.getInstructions().get(1).getSign());
     }
@@ -790,7 +789,7 @@ public class GraphHopperOSMTest {
 
     @Test
     public void testMultipleCHPreparationsInParallel() {
-        HashMap<String, Integer> shortcutCountMap = new HashMap<String, Integer>();
+        HashMap<String, Long> shortcutCountMap = new HashMap<>();
         // try all parallelization modes        
         for (int threadCount = 1; threadCount < 6; threadCount++) {
             EncodingManager em = new EncodingManager(Arrays.asList(new CarFlagEncoder(), new MotorcycleFlagEncoder(),
@@ -811,11 +810,11 @@ public class GraphHopperOSMTest {
                 assertTrue("Preparation wasn't run! [" + threadCount + "]", pch.isPrepared());
 
                 String name = AbstractWeighting.weightingToFileName(pch.getWeighting());
-                Integer singleThreadShortcutCount = shortcutCountMap.get(name);
+                Long singleThreadShortcutCount = shortcutCountMap.get(name);
                 if (singleThreadShortcutCount == null)
                     shortcutCountMap.put(name, pch.getShortcuts());
                 else
-                    assertEquals((int) singleThreadShortcutCount, pch.getShortcuts());
+                    assertEquals((long) singleThreadShortcutCount, pch.getShortcuts());
 
                 String keyError = Parameters.CH.PREPARE + "error." + name;
                 String valueError = tmpGH.getGraphHopperStorage().getProperties().get(keyError);
@@ -831,7 +830,7 @@ public class GraphHopperOSMTest {
 
     @Test
     public void testMultipleLMPreparationsInParallel() {
-        HashMap<String, Integer> landmarkCount = new HashMap<String, Integer>();
+        HashMap<String, Integer> landmarkCount = new HashMap<>();
         // try all parallelization modes
         for (int threadCount = 1; threadCount < 6; threadCount++) {
             EncodingManager em = new EncodingManager(Arrays.asList(new CarFlagEncoder(), new MotorcycleFlagEncoder(),

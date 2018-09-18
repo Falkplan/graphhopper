@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -56,7 +56,7 @@ public class GraphHopperStorageCHTest extends GraphHopperStorageTest {
         graph = new GraphBuilder(encodingManager).setLocation(defaultGraphLoc).setMmap(false).setStore(true).create();
         try {
             graph.loadExisting();
-            assertTrue(false);
+            fail();
         } catch (Exception ex) {
         }
 
@@ -195,6 +195,11 @@ public class GraphHopperStorageCHTest extends GraphHopperStorageTest {
         assertEquals(100.123, sc1.getWeight(), 1e-3);
         assertFalse(sc1.isForward(carEncoder));
         assertTrue(sc1.isBackward(carEncoder));
+
+        // check min weight
+        sc1.setFlags(flags);
+        sc1.setWeight(1e-5);
+        assertEquals(1e-3, sc1.getWeight(), 1e-10);
     }
 
     @Test
@@ -291,7 +296,7 @@ public class GraphHopperStorageCHTest extends GraphHopperStorageTest {
         assertEquals(1, GHUtility.count(graph.createEdgeExplorer().setBaseNode(1)));
         assertEquals(1, GHUtility.count(chGraph.createEdgeExplorer().setBaseNode(1)));
 
-        // base graph does not see shortcut        
+        // base graph does not see shortcut
         assertEquals(0, GHUtility.count(graph.createEdgeExplorer().setBaseNode(2)));
         assertEquals(1, GHUtility.count(chGraph.createEdgeExplorer().setBaseNode(2)));
 
@@ -304,8 +309,8 @@ public class GraphHopperStorageCHTest extends GraphHopperStorageTest {
 
         chGraph = getGraph(graph);
         assertEquals(10, chGraph.getNodes());
-        assertEquals(2, graph.getAllEdges().getMaxId());
-        assertEquals(3, chGraph.getAllEdges().getMaxId());
+        assertEquals(2, graph.getAllEdges().length());
+        assertEquals(3, chGraph.getAllEdges().length());
         assertEquals(1, GHUtility.count(chGraph.createEdgeExplorer().setBaseNode(2)));
 
         AllCHEdgesIterator iter = chGraph.getAllEdges();
@@ -333,10 +338,50 @@ public class GraphHopperStorageCHTest extends GraphHopperStorageTest {
         CHGraph lg = graph.getGraph(CHGraph.class);
         lg.shortcut(1, 4).setWeight(3).setFlags(carEncoder.setProperties(10, true, true));
 
-        EdgeExplorer vehicleOutExplorer = lg.createEdgeExplorer(new DefaultEdgeFilter(carEncoder, false, true));
+        EdgeExplorer vehicleOutExplorer = lg.createEdgeExplorer(DefaultEdgeFilter.outEdges(carEncoder));
         // iteration should result in same nodes even if reusing the iterator
         assertEquals(GHUtility.asSet(3, 4), GHUtility.getNeighbors(vehicleOutExplorer.setBaseNode(1)));
         assertEquals(GHUtility.asSet(3, 4), GHUtility.getNeighbors(vehicleOutExplorer.setBaseNode(1)));
+    }
+
+    @Test
+    public void testAddShortcutSkippedEdgesWriteRead() {
+        graph = createGHStorage();
+        final EdgeIteratorState edge1 = graph.edge(1, 3, 10, true);
+        final EdgeIteratorState edge2 = graph.edge(3, 4, 10, true);
+        graph.freeze();
+
+        CHGraph lg = graph.getGraph(CHGraph.class);
+        lg.shortcut(1, 4);
+
+        AllCHEdgesIterator iter = lg.getAllEdges();
+        iter.next();
+        iter.next();
+        iter.next();
+        assertTrue(iter.isShortcut());
+        iter.setSkippedEdges(edge1.getEdge(), edge2.getEdge());
+        assertEquals(edge1.getEdge(), iter.getSkippedEdge1());
+        assertEquals(edge2.getEdge(), iter.getSkippedEdge2());
+    }
+
+    @Test
+    public void testAddShortcutSkippedEdgesWriteRead_writeWithCHEdgeIterator() {
+        graph = createGHStorage();
+        final EdgeIteratorState edge1 = graph.edge(1, 3, 10, true);
+        final EdgeIteratorState edge2 = graph.edge(3, 4, 10, true);
+        graph.freeze();
+
+        CHGraph lg = graph.getGraph(CHGraph.class);
+        CHEdgeIteratorState shortcut = lg.shortcut(1, 4);
+        shortcut.setSkippedEdges(edge1.getEdge(), edge2.getEdge());
+
+        AllCHEdgesIterator iter = lg.getAllEdges();
+        iter.next();
+        iter.next();
+        iter.next();
+        assertTrue(iter.isShortcut());
+        assertEquals(edge1.getEdge(), iter.getSkippedEdge1());
+        assertEquals(edge2.getEdge(), iter.getSkippedEdge2());
     }
 
     @Test
@@ -344,7 +389,7 @@ public class GraphHopperStorageCHTest extends GraphHopperStorageTest {
         FlagEncoder tmpCar = new CarFlagEncoder();
         FlagEncoder tmpBike = new Bike2WeightFlagEncoder();
         EncodingManager em = new EncodingManager(tmpCar, tmpBike);
-        List<Weighting> chWeightings = new ArrayList<Weighting>();
+        List<Weighting> chWeightings = new ArrayList<>();
         chWeightings.add(new FastestWeighting(tmpCar));
         chWeightings.add(new FastestWeighting(tmpBike));
 

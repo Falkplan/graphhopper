@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -75,7 +75,7 @@ public class FootFlagEncoderTest {
         g.edge(0, 1).setDistance(10).setFlags(footEncoder.setProperties(10, true, true));
         g.edge(0, 2).setDistance(10).setFlags(footEncoder.setProperties(5, true, true));
         g.edge(1, 3).setDistance(10).setFlags(footEncoder.setProperties(10, true, true));
-        EdgeExplorer out = g.createEdgeExplorer(new DefaultEdgeFilter(footEncoder, false, true));
+        EdgeExplorer out = g.createEdgeExplorer(DefaultEdgeFilter.outEdges(footEncoder));
         assertEquals(GHUtility.asSet(1, 2), GHUtility.getNeighbors(out.setBaseNode(0)));
         assertEquals(GHUtility.asSet(0, 3), GHUtility.getNeighbors(out.setBaseNode(1)));
         assertEquals(GHUtility.asSet(0), GHUtility.getNeighbors(out.setBaseNode(2)));
@@ -92,6 +92,12 @@ public class FootFlagEncoderTest {
         assertTrue(footEncoder.acceptWay(way) > 0);
 
         way.setTag("sidewalk", "none");
+        assertFalse(footEncoder.acceptWay(way) > 0);
+
+        way.clearTags();
+        way.setTag("highway", "tertiary");
+        way.setTag("sidewalk", "left");
+        way.setTag("access", "private");
         assertFalse(footEncoder.acceptWay(way) > 0);
         way.clearTags();
 
@@ -193,6 +199,25 @@ public class FootFlagEncoderTest {
         way.setTag("railway", "tram");
         flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
         assertEquals(0, flags);
+    }
+
+    @Test
+    public void testPier() {
+        ReaderWay way = new ReaderWay(1);
+        way.setTag("man_made", "pier");
+        long flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
+        assertNotEquals(0, flags);
+    }
+
+    @Test
+    public void testFerrySpeed() {
+        ReaderWay way = new ReaderWay(1);
+        way.setTag("route", "ferry");
+        // a bit longer than an hour
+        way.setTag("duration:seconds", "4000");
+        long flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
+        assertTrue(footEncoder.getSpeed(flags) > footEncoder.getMaxSpeed());
+        assertEquals(20, footEncoder.getSpeed(flags), .1);
     }
 
     @Test
@@ -338,6 +363,15 @@ public class FootFlagEncoderTest {
     public void handleWayTagsRoundabout() {
         ReaderWay way = new ReaderWay(1);
         way.setTag("junction", "roundabout");
+        way.setTag("highway", "tertiary");
+        long flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
+        assertTrue(footEncoder.isBool(flags, FlagEncoder.K_ROUNDABOUT));
+    }
+
+    @Test
+    public void handleWayTagsCircularJunction() {
+        ReaderWay way = new ReaderWay(1);
+        way.setTag("junction", "circular");
         way.setTag("highway", "tertiary");
         long flags = footEncoder.handleWayTags(way, footEncoder.acceptWay(way), 0);
         assertTrue(footEncoder.isBool(flags, FlagEncoder.K_ROUNDABOUT));

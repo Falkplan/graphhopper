@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -82,6 +82,13 @@ public class CarFlagEncoderTest {
         way.setTag("foot", "yes");
         assertFalse(encoder.acceptWay(way) > 0);
         assertFalse(encoder.isFerry(encoder.acceptWay(way)));
+
+        way.clearTags();
+        way.setTag("route", "ferry");
+        way.setTag("access", "no");
+        assertFalse(encoder.acceptWay(way) > 0);
+        way.setTag("vehicle", "yes");
+        assertTrue(encoder.acceptWay(way) > 0);
 
         way.clearTags();
         way.setTag("access", "yes");
@@ -366,6 +373,14 @@ public class CarFlagEncoderTest {
         assertTrue(encoder.isForward(flags));
         assertFalse(encoder.isBackward(flags));
         assertTrue(encoder.isBool(flags, FlagEncoder.K_ROUNDABOUT));
+
+        way.clearTags();
+        way.setTag("highway", "motorway");
+        way.setTag("junction", "circular");
+        flags = encoder.handleWayTags(way, encoder.acceptBit, 0);
+        assertTrue(encoder.isForward(flags));
+        assertFalse(encoder.isBackward(flags));
+        assertTrue(encoder.isBool(flags, FlagEncoder.K_ROUNDABOUT));
     }
 
     @Test
@@ -407,7 +422,7 @@ public class CarFlagEncoderTest {
         // accept
         assertTrue(encoder.acceptWay(way) > 0);
         // calculate speed from estimated_distance and duration
-        assertEquals(61, encoder.getFerrySpeed(way, 20, 30, 40), 1e-1);
+        assertEquals(61, encoder.getFerrySpeed(way), 1e-1);
 
         //Test for very short and slow 0.5km/h still realisitic ferry
         way = new ReaderWay(1);
@@ -419,7 +434,7 @@ public class CarFlagEncoderTest {
         // accept
         assertTrue(encoder.acceptWay(way) > 0);
         // We can't store 0.5km/h, but we expect the lowest possible speed (5km/h)
-        assertEquals(2.5, encoder.getFerrySpeed(way, 20, 30, 40), 1e-1);
+        assertEquals(2.5, encoder.getFerrySpeed(way), 1e-1);
         assertEquals(5, encoder.getSpeed(encoder.setSpeed(0, 2.5)), 1e-1);
 
         //Test for an unrealisitic long duration
@@ -432,7 +447,7 @@ public class CarFlagEncoderTest {
         // accept
         assertTrue(encoder.acceptWay(way) > 0);
         // We have ignored the unrealisitc long duration and take the unknown speed
-        assertEquals(20, encoder.getFerrySpeed(way, 20, 30, 40), 1e-1);
+        assertEquals(2.5, encoder.getFerrySpeed(way), 1e-1);
     }
 
     @Test
@@ -603,5 +618,17 @@ public class CarFlagEncoderTest {
         way.setTag("surface", "unpaved");
         assertEquals(30, encoder.applyBadSurfaceSpeed(way, 90), 1e-1);
 
+    }
+
+    @Test
+    public void testIssue_1256() {
+        ReaderWay way = new ReaderWay(1);
+        way.setTag("route", "ferry");
+        way.setTag("estimated_distance", 257);
+
+        CarFlagEncoder lowFactorCar = new CarFlagEncoder(10, 1, 0);
+        lowFactorCar.defineWayBits(0,0);
+        assertEquals(2.5, encoder.getFerrySpeed(way), .1);
+        assertEquals(.5, lowFactorCar.getFerrySpeed(way), .1);
     }
 }

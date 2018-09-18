@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,13 +35,13 @@ public class ShortFastestWeighting extends FastestWeighting {
     private final double distanceFactor;
     private final double timeFactor;
 
-    public ShortFastestWeighting(FlagEncoder encoder, PMap pMap) {
+    public ShortFastestWeighting(FlagEncoder encoder, PMap map) {
         super(encoder);
-        timeFactor = checkBounds(TIME_FACTOR, pMap.getDouble(TIME_FACTOR, 1));
+        timeFactor = checkBounds(TIME_FACTOR, map.getDouble(TIME_FACTOR, 1));
 
         // is it faster to include timeFactor via distanceFactor = tmp / timeFactor?
         // default value derived from the cost for time e.g. 25€/hour and for distance 0.5€/km
-        distanceFactor = checkBounds(DISTANCE_FACTOR, pMap.getDouble(DISTANCE_FACTOR, 0.07));
+        distanceFactor = checkBounds(DISTANCE_FACTOR, map.getDouble(DISTANCE_FACTOR, 0.07));
 
         if (timeFactor < 1e-5 && distanceFactor < 1e-5)
             throw new IllegalArgumentException("[" + NAME + "] one of distance_factor or time_factor has to be non-zero");
@@ -55,7 +55,8 @@ public class ShortFastestWeighting extends FastestWeighting {
 
     @Override
     public double getMinWeight(double distance) {
-        return super.getMinWeight(distance * distanceFactor);
+        // TODO: Should we add the [+ distance * distanceFactor]. It improves the heuristic of the A*.
+        return super.getMinWeight(distance) * timeFactor + distance * distanceFactor;
     }
 
     @Override

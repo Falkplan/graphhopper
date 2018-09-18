@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,6 +17,7 @@
  */
 package com.graphhopper.util;
 
+import com.carrotsearch.hppc.IntArrayList;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.routing.Dijkstra;
 import com.graphhopper.routing.Path;
@@ -28,7 +29,6 @@ import com.graphhopper.routing.weighting.ShortestWeighting;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.GraphBuilder;
 import com.graphhopper.storage.NodeAccess;
-import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.xml.sax.SAXException;
@@ -111,12 +111,12 @@ public class InstructionListTest {
         Path p = new Dijkstra(g, new ShortestWeighting(carEncoder), tMode).calcPath(0, 10);
         InstructionList wayList = p.calcInstructions(usTR);
         List<String> tmpList = pick("text", wayList.createJson());
-        assertEquals(Arrays.asList("Continue onto 0-1", "Turn right onto 1-4", "Turn left onto 7-8", "Finish!"),
+        assertEquals(Arrays.asList("Continue onto 0-1", "Turn right onto 1-4", "Turn left onto 7-8", "Arrive at destination"),
                 tmpList);
 
         wayList = p.calcInstructions(trMap.getWithFallBack(Locale.GERMAN));
         tmpList = pick("text", wayList.createJson());
-        assertEquals(Arrays.asList("Geradeaus auf 0-1", "Rechts abbiegen auf 1-4", "Links abbiegen auf 7-8", "Ziel erreicht!"),
+        assertEquals(Arrays.asList("Dem Straßenverlauf von 0-1 folgen", "Rechts abbiegen auf 1-4", "Links abbiegen auf 7-8", "Ziel erreicht"),
                 tmpList);
 
         assertEquals(70000.0, sumDistances(wayList), 1e-1);
@@ -137,11 +137,11 @@ public class InstructionListTest {
 
         p = new Dijkstra(g, new ShortestWeighting(carEncoder), tMode).calcPath(6, 2);
         assertEquals(42000, p.getDistance(), 1e-2);
-        assertEquals(Helper.createTList(6, 7, 8, 5, 2), p.calcNodes());
+        assertEquals(IntArrayList.from(new int[]{6, 7, 8, 5, 2}), p.calcNodes());
 
         wayList = p.calcInstructions(usTR);
         tmpList = pick("text", wayList.createJson());
-        assertEquals(Arrays.asList("Continue onto 6-7", "Turn left onto 5-8", "Finish!"),
+        assertEquals(Arrays.asList("Continue onto 6-7", "Turn left onto 5-8", "Arrive at destination"),
                 tmpList);
 
         compare(Arrays.asList(asL(1d, 1d), asL(1d, 1.2), asL(1.2, 1.2)),
@@ -151,11 +151,11 @@ public class InstructionListTest {
         p = new Dijkstra(g, new ShortestWeighting(carEncoder), tMode).calcPath(0, 0);
         wayList = p.calcInstructions(usTR);
         assertEquals(1, wayList.size());
-        assertEquals("Finish!", wayList.get(0).getTurnDescription(usTR));
+        assertEquals("arrive at destination", wayList.get(0).getTurnDescription(usTR));
     }
 
     List<String> pick(String key, List<Map<String, Object>> instructionJson) {
-        List<String> list = new ArrayList<String>();
+        List<String> list = new ArrayList<>();
 
         for (Map<String, Object> json : instructionJson) {
             list.add(json.get(key).toString());
@@ -164,9 +164,9 @@ public class InstructionListTest {
     }
 
     List<List<Double>> createList(PointList pl, List<Integer> integs) {
-        List<List<Double>> list = new ArrayList<List<Double>>();
+        List<List<Double>> list = new ArrayList<>();
         for (int i : integs) {
-            List<Double> entryList = new ArrayList<Double>(2);
+            List<Double> entryList = new ArrayList<>(2);
             entryList.add(pl.getLatitude(i));
             entryList.add(pl.getLongitude(i));
             list.add(entryList);
@@ -226,13 +226,13 @@ public class InstructionListTest {
 
         InstructionList wayList = p.calcInstructions(usTR);
         List<String> tmpList = pick("text", wayList.createJson());
-        assertEquals(Arrays.asList("Continue onto 2-4", "Turn slight right onto 3-4", "Finish!"),
+        assertEquals(Arrays.asList("Continue onto 2-4", "Turn slight right onto 3-4", "Arrive at destination"),
                 tmpList);
 
         p = new Dijkstra(g, new ShortestWeighting(carEncoder), tMode).calcPath(3, 5);
         wayList = p.calcInstructions(usTR);
         tmpList = pick("text", wayList.createJson());
-        assertEquals(Arrays.asList("Continue onto 3-4", "Turn slight right onto 4-5", "Finish!"),
+        assertEquals(Arrays.asList("Continue onto 3-4", "Keep right onto 4-5", "Arrive at destination"),
                 tmpList);
     }
 
@@ -264,7 +264,7 @@ public class InstructionListTest {
         Path p = new Dijkstra(g, new ShortestWeighting(carEncoder), tMode).calcPath(2, 3);
         InstructionList wayList = p.calcInstructions(usTR);
         List<String> tmpList = pick("text", wayList.createJson());
-        assertEquals(Arrays.asList("Continue onto street", "Turn right onto street", "Finish!"), tmpList);
+        assertEquals(Arrays.asList("Continue onto street", "Turn right onto street", "Arrive at destination"), tmpList);
     }
 
     @Test
@@ -314,7 +314,7 @@ public class InstructionListTest {
         assertEquals(15.1, wayList.get(2).getFirstLat(), 1e-3);
         assertEquals(9.9, wayList.get(2).getFirstLon(), 1e-3);
 
-        String gpxStr = wayList.createGPX("test", 0);
+        String gpxStr = wayList.createGPX("test", 0, Constants.VERSION);
         verifyGPX(gpxStr);
 
         assertTrue(gpxStr, gpxStr.contains("<trkpt lat=\"15.0\" lon=\"10.0\"><time>1970-01-01T00:00:00Z</time>"));
@@ -331,56 +331,49 @@ public class InstructionListTest {
     }
 
     @Test
-    public void testRoundaboutJsonIntegrity() {
-        InstructionList il = new InstructionList(usTR);
+    public void testCreateGPXIncludesRoundaboutExitNumber() {
+        InstructionList instructions = new InstructionList(usTR);
 
         PointList pl = new PointList();
-        pl.add(52.514, 13.349);
-        pl.add(52.5135, 13.35);
-        pl.add(52.514, 13.351);
+        pl.add(52.555423473315, 13.43890086052345);
+        pl.add(52.555550691982, 13.43946393816465);
+        pl.add(52.555619423589, 13.43886994061328);
         RoundaboutInstruction instr = new RoundaboutInstruction(Instruction.USE_ROUNDABOUT, "streetname",
-                new InstructionAnnotation(0, ""), pl)
-                .setDirOfRotation(-0.1)
-                .setRadian(-Math.PI + 1)
-                .setExitNumber(2)
+                InstructionAnnotation.EMPTY, pl)
+                .setRadian(2.058006514284998d)
+                .setExitNumber(3)
                 .setExited();
-        il.add(instr);
+        instructions.add(instr);
+        instructions.add(new FinishInstruction(52.555619423589, 13.43886994061328, 0));
 
-        Map<String, Object> json = il.createJson().get(0);
-        // assert that all information is present in map for JSON
-        assertEquals("At roundabout, take exit 2 onto streetname", json.get("text").toString());
-        assertEquals(-1, (Double) json.get("turn_angle"), 0.01);
-        assertEquals("2", json.get("exit_number").toString());
-        // assert that a valid JSON object can be written
-        assertNotNull(new JSONObject(json).toString());
+        String gpxStr = instructions.createGPX("test", 0, true, true, false, false, Constants.VERSION);
+
+        assertTrue(gpxStr, gpxStr.contains("<gh:exit_number>3</gh:exit_number>"));
+        verifyGPX(gpxStr);
     }
 
-    // Roundabout with unknown dir of rotation
     @Test
-    public void testRoundaboutJsonNaN() {
-        InstructionList il = new InstructionList(usTR);
+    public void testCreateGPXCorrectFormattingSmallNumbers() {
+        InstructionList instructions = new InstructionList(usTR);
 
         PointList pl = new PointList();
-        pl.add(52.514, 13.349);
-        pl.add(52.5135, 13.35);
-        pl.add(52.514, 13.351);
-        RoundaboutInstruction instr = new RoundaboutInstruction(Instruction.USE_ROUNDABOUT, "streetname",
-                new InstructionAnnotation(0, ""), pl)
-                .setRadian(-Math.PI + 1)
-                .setExitNumber(2)
-                .setExited();
-        il.add(instr);
+        pl.add(0.000001, 0.000001);
+        pl.add(-0.000123, -0.000125);
+        Instruction instruction = new Instruction(0, "do it", null, pl);
+        instructions.add(instruction);
+        instructions.add(new FinishInstruction(0.000852, 0.000852, 0));
 
-        Map<String, Object> json = il.createJson().get(0);
-        assertEquals("At roundabout, take exit 2 onto streetname", json.get("text").toString());
-        assertNull(json.get("turn_angle"));
-        // assert that a valid JSON object can be written
-        assertNotNull(new JSONObject(json).toString());
+        String gpxStr = instructions.createGPX("test", 0, true, true, true, true, Constants.VERSION);
+
+        assertFalse(gpxStr, gpxStr.contains("E-"));
+        assertTrue(gpxStr, gpxStr.contains("0.000001"));
+        assertTrue(gpxStr, gpxStr.contains("-0.000125"));
+        verifyGPX(gpxStr);
     }
 
     @Test
     public void testCreateGPXWithEle() {
-        final List<GPXEntry> fakeList = new ArrayList<GPXEntry>();
+        final List<GPXEntry> fakeList = new ArrayList<>();
         fakeList.add(new GPXEntry(12, 13, 0));
         fakeList.add(new GPXEntry(12.5, 13, 1000));
         InstructionList il = new InstructionList(usTR) {
@@ -389,7 +382,7 @@ public class InstructionListTest {
                 return fakeList;
             }
         };
-        String gpxStr = il.createGPX("test", 0);
+        String gpxStr = il.createGPX("test", 0, Constants.VERSION);
         verifyGPX(gpxStr);
         assertFalse(gpxStr, gpxStr.contains("NaN"));
         assertFalse(gpxStr, gpxStr.contains("<ele>"));
@@ -397,7 +390,7 @@ public class InstructionListTest {
         fakeList.clear();
         fakeList.add(new GPXEntry(12, 13, 11, 0));
         fakeList.add(new GPXEntry(12.5, 13, 10, 1000));
-        gpxStr = il.createGPX("test", 0, true, true, true, true);
+        gpxStr = il.createGPX("test", 0, true, true, true, true, Constants.VERSION);
 
         assertTrue(gpxStr, gpxStr.contains("<ele>11.0</ele>"));
         assertFalse(gpxStr, gpxStr.contains("NaN"));
@@ -430,7 +423,7 @@ public class InstructionListTest {
         assertEquals(19000, result.get(3).getTime());
         assertEquals(22000, result.get(4).getTime());
 
-        verifyGPX(instructions.createGPX());
+        verifyGPX(instructions.createGPX(Constants.VERSION));
     }
 
     private long flagsForSpeed(EncodingManager encodingManager, int speedKmPerHour) {

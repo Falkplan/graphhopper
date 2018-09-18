@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -291,6 +291,12 @@ public class BikeFlagEncoderTest extends AbstractBikeFlagEncoderTester {
         way.setTag("highway", "tertiary");
         long flags = encoder.handleWayTags(way, encoder.acceptWay(way), 0);
         assertTrue(encoder.isBool(flags, FlagEncoder.K_ROUNDABOUT));
+
+        way.clearTags();
+        way.setTag("junction", "circular");
+        way.setTag("highway", "tertiary");
+        flags = encoder.handleWayTags(way, encoder.acceptWay(way), 0);
+        assertTrue(encoder.isBool(flags, FlagEncoder.K_ROUNDABOUT));
     }
 
     @Test
@@ -318,6 +324,13 @@ public class BikeFlagEncoderTest extends AbstractBikeFlagEncoderTester {
         way.setTag("bicycle", "yes");
         way.setTag("access", "no");
         assertTrue(encoder.acceptWay(way) > 0);
+
+        // #1122
+        way.clearTags();
+        way.setTag("route", "ferry");
+        way.setTag("bicycle", "yes");
+        way.setTag("access", "private");
+        assertTrue(encoder.acceptWay(way) == 0);
     }
 
     @Test

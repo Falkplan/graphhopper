@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -37,8 +37,8 @@ import static com.graphhopper.routing.util.PriorityCode.BEST;
  */
 public class MotorcycleFlagEncoder extends CarFlagEncoder {
     public static final int CURVATURE_KEY = 112;
-    private final HashSet<String> avoidSet = new HashSet<String>();
-    private final HashSet<String> preferSet = new HashSet<String>();
+    private final HashSet<String> avoidSet = new HashSet<>();
+    private final HashSet<String> preferSet = new HashSet<>();
     private EncodedDoubleValue reverseSpeedEncoder;
     private EncodedValue priorityWayEncoder;
     private EncodedValue curvatureEncoder;
@@ -147,13 +147,14 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
     @Override
     public long acceptWay(ReaderWay way) {
         String highwayValue = way.getTag("highway");
+        String firstValue = way.getFirstPriorityTag(restrictions);
         if (highwayValue == null) {
             if (way.hasTag("route", ferries)) {
-                String motorcycleTag = way.getTag("motorcycle");
-                if (motorcycleTag == null)
-                    motorcycleTag = way.getTag("motor_vehicle");
-
-                if (motorcycleTag == null && !way.hasTag("foot") && !way.hasTag("bicycle") || "yes".equals(motorcycleTag))
+                if (restrictedValues.contains(firstValue))
+                    return 0;
+                if (intendedValues.contains(firstValue) ||
+                        // implied default is allowed only if foot and bicycle is not specified:
+                        firstValue.isEmpty() && !way.hasTag("foot") && !way.hasTag("bicycle"))
                     return acceptBit | ferryBit;
             }
             return 0;
@@ -171,7 +172,6 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
         if (way.hasTag("impassable", "yes") || way.hasTag("status", "impassable"))
             return 0;
 
-        String firstValue = way.getFirstPriorityTag(restrictions);
         if (!firstValue.isEmpty()) {
             if (restrictedValues.contains(firstValue) && !getConditionalTagInspector().isRestrictedWayConditionallyPermitted(way))
                 return 0;
@@ -208,7 +208,7 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
             if (speed > 30 && way.hasTag("surface", badSurfaceSpeedMap))
                 speed = 30;
 
-            boolean isRoundabout = way.hasTag("junction", "roundabout");
+            boolean isRoundabout = way.hasTag("junction", "roundabout") || way.hasTag("junction", "circular");
             if (isRoundabout)
                 flags = setBool(0, K_ROUNDABOUT, true);
 
@@ -227,7 +227,7 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
             }
 
         } else {
-            double ferrySpeed = getFerrySpeed(way, defaultSpeedMap.get("living_street"), defaultSpeedMap.get("service"), defaultSpeedMap.get("residential"));
+            double ferrySpeed = getFerrySpeed(way);
             flags = setSpeed(flags, ferrySpeed);
             flags = setReverseSpeed(flags, ferrySpeed);
             flags |= directionBitMask;

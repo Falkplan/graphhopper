@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -43,17 +43,17 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
     public static final int K_UNPAVED = 100;
     protected static final int PUSHING_SECTION_SPEED = 4;
     // Pushing section heighways are parts where you need to get off your bike and push it (German: Schiebestrecke)
-    protected final HashSet<String> pushingSectionsHighways = new HashSet<String>();
-    protected final HashSet<String> oppositeLanes = new HashSet<String>();
-    protected final Set<String> preferHighwayTags = new HashSet<String>();
-    protected final Set<String> avoidHighwayTags = new HashSet<String>();
-    protected final Set<String> unpavedSurfaceTags = new HashSet<String>();
-    private final Map<String, Integer> trackTypeSpeeds = new HashMap<String, Integer>();
-    private final Map<String, Integer> surfaceSpeeds = new HashMap<String, Integer>();
-    private final Set<String> roadValues = new HashSet<String>();
-    private final Map<String, Integer> highwaySpeeds = new HashMap<String, Integer>();
+    protected final HashSet<String> pushingSectionsHighways = new HashSet<>();
+    protected final HashSet<String> oppositeLanes = new HashSet<>();
+    protected final Set<String> preferHighwayTags = new HashSet<>();
+    protected final Set<String> avoidHighwayTags = new HashSet<>();
+    protected final Set<String> unpavedSurfaceTags = new HashSet<>();
+    private final Map<String, Integer> trackTypeSpeeds = new HashMap<>();
+    private final Map<String, Integer> surfaceSpeeds = new HashMap<>();
+    private final Set<String> roadValues = new HashSet<>();
+    private final Map<String, Integer> highwaySpeeds = new HashMap<>();
     // convert network tag of bicycle routes into a way route code
-    private final Map<String, Integer> bikeNetworkToCode = new HashMap<String, Integer>();
+    private final Map<String, Integer> bikeNetworkToCode = new HashMap<>();
     protected EncodedValue relationCodeEncoder;
     EncodedValue priorityWayEncoder;
     private long unpavedBit = 0;
@@ -231,16 +231,27 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
     public long acceptWay(ReaderWay way) {
         String highwayValue = way.getTag("highway");
         if (highwayValue == null) {
+            long acceptPotentially = 0;
+
             if (way.hasTag("route", ferries)) {
                 // if bike is NOT explicitly tagged allow bike but only if foot is not specified
                 String bikeTag = way.getTag("bicycle");
                 if (bikeTag == null && !way.hasTag("foot") || "yes".equals(bikeTag))
-                    return acceptBit | ferryBit;
+                    acceptPotentially = acceptBit | ferryBit;
             }
 
             // special case not for all acceptedRailways, only platform
             if (way.hasTag("railway", "platform"))
-                return acceptBit;
+                acceptPotentially = acceptBit;
+
+            if (way.hasTag("man_made", "pier"))
+                acceptPotentially = acceptBit;
+
+            if (acceptPotentially != 0) {
+                if (way.hasTag(restrictions, restrictedValues) && !getConditionalTagInspector().isRestrictedWayConditionallyPermitted(way))
+                    return 0;
+                return acceptPotentially;
+            }
 
             return 0;
         }
@@ -314,8 +325,8 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
      * just only 90%.
      * <p>
      *
-     * @param way:   needed to retrieve tags
-     * @param speed: speed guessed e.g. from the road type or other tags
+     * @param way   needed to retrieve tags
+     * @param speed speed guessed e.g. from the road type or other tags
      * @return The assumed average speed.
      */
     @Override
@@ -342,16 +353,13 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
             flags = handleSpeed(way, wayTypeSpeed, flags);
             flags = handleBikeRelated(way, flags, relationFlags > UNCHANGED.getValue());
 
-            boolean isRoundabout = way.hasTag("junction", "roundabout");
+            boolean isRoundabout = way.hasTag("junction", "roundabout") || way.hasTag("junction", "circular");
             if (isRoundabout) {
                 flags = setBool(flags, K_ROUNDABOUT, true);
             }
 
         } else {
-            double ferrySpeed = getFerrySpeed(way,
-                    highwaySpeeds.get("living_street"),
-                    highwaySpeeds.get("track"),
-                    highwaySpeeds.get("primary"));
+            double ferrySpeed = getFerrySpeed(way);
             flags = handleSpeed(way, ferrySpeed, flags);
             flags |= directionBitMask;
         }
@@ -475,7 +483,7 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
      * @return new priority based on priorityFromRelation and on the tags in ReaderWay.
      */
     protected int handlePriority(ReaderWay way, double wayTypeSpeed, int priorityFromRelation) {
-        TreeMap<Double, Integer> weightToPrioMap = new TreeMap<Double, Integer>();
+        TreeMap<Double, Integer> weightToPrioMap = new TreeMap<>();
         if (priorityFromRelation == 0)
             weightToPrioMap.put(0d, UNCHANGED.getValue());
         else

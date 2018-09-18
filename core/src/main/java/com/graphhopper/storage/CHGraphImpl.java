@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,6 +28,8 @@ import com.graphhopper.storage.BaseGraph.CommonEdgeIterator;
 import com.graphhopper.storage.BaseGraph.EdgeIterable;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static com.graphhopper.util.Helper.nf;
 
@@ -39,10 +41,12 @@ import static com.graphhopper.util.Helper.nf;
  * @author Peter Karich
  */
 public class CHGraphImpl implements CHGraph, Storable<CHGraph> {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CHGraphImpl.class);
     private static final double WEIGHT_FACTOR = 1000f;
     // 2 bits for access, for now only 32bit => not Long.MAX
     private static final long MAX_WEIGHT_LONG = (Integer.MAX_VALUE >> 2) << 2;
     private static final double MAX_WEIGHT = (Integer.MAX_VALUE >> 2) / WEIGHT_FACTOR;
+    private static final double MIN_WEIGHT = 1 / WEIGHT_FACTOR;
     final DataAccess shortcuts;
     final DataAccess nodesCH;
     final long scDirMask = PrepareEncoder.getScDirMask();
@@ -283,6 +287,14 @@ public class CHGraphImpl implements CHGraph, Storable<CHGraph> {
             throw new IllegalArgumentException("weight cannot be negative but was " + weight);
 
         long weightLong;
+
+        if (weight < MIN_WEIGHT) {
+            NodeAccess nodeAccess = getNodeAccess();
+            LOGGER.warn("Setting weights smaller than " + MIN_WEIGHT + " is not allowed in CHGraphImpl#setWeight. " +
+                    "You passed: " + weight + " for the edge " + edge.getEdge() + " from " + nodeAccess.getLat(edge.getBaseNode()) + "," + nodeAccess.getLon(edge.getBaseNode()) +
+                    " to " + nodeAccess.getLat(edge.getAdjNode()) + "," + nodeAccess.getLon(edge.getAdjNode()));
+            weight = MIN_WEIGHT;
+        }
         if (weight > MAX_WEIGHT)
             weightLong = MAX_WEIGHT_LONG;
         else
@@ -581,24 +593,31 @@ public class CHGraphImpl implements CHGraph, Storable<CHGraph> {
         }
 
         @Override
-        public int getMaxId() {
-            return super.getMaxId() + shortcutCount;
+        public int length() {
+            return super.length() + shortcutCount;
         }
 
         @Override
         public final void setSkippedEdges(int edge1, int edge2) {
-            baseGraph.edges.setInt(edgePointer + S_SKIP_EDGE1, edge1);
-            baseGraph.edges.setInt(edgePointer + S_SKIP_EDGE2, edge2);
+            checkShortcut(true, "setSkippedEdges");
+            if (EdgeIterator.Edge.isValid(edge1) != EdgeIterator.Edge.isValid(edge2)) {
+                throw new IllegalStateException("Skipped edges of a shortcut needs "
+                        + "to be both valid or invalid but they were not " + edge1 + ", " + edge2);
+            }
+            shortcuts.setInt(edgePointer + S_SKIP_EDGE1, edge1);
+            shortcuts.setInt(edgePointer + S_SKIP_EDGE2, edge2);
         }
 
         @Override
         public final int getSkippedEdge1() {
-            return baseGraph.edges.getInt(edgePointer + S_SKIP_EDGE1);
+            checkShortcut(true, "getSkippedEdge1");
+            return shortcuts.getInt(edgePointer + S_SKIP_EDGE1);
         }
 
         @Override
         public final int getSkippedEdge2() {
-            return baseGraph.edges.getInt(edgePointer + S_SKIP_EDGE2);
+            checkShortcut(true, "getSkippedEdge2");
+            return shortcuts.getInt(edgePointer + S_SKIP_EDGE2);
         }
 
         @Override
@@ -621,6 +640,14 @@ public class CHGraphImpl implements CHGraph, Storable<CHGraph> {
         @Override
         public int getMergeStatus(long flags) {
             return PrepareEncoder.getScMergeStatus(getDirectFlags(), flags);
+        }
+
+        void checkShortcut(boolean shouldBeShortcut, String methodName) {
+            if (isShortcut()) {
+                if (!shouldBeShortcut)
+                    throw new IllegalStateException("Cannot call " + methodName + " on shortcut " + getEdge());
+            } else if (shouldBeShortcut)
+                throw new IllegalStateException("Method " + methodName + " only for shortcuts " + getEdge());
         }
     }
 }

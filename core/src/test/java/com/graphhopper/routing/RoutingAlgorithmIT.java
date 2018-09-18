@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,7 +18,7 @@
 package com.graphhopper.routing;
 
 import com.graphhopper.GraphHopper;
-import com.graphhopper.reader.PrinctonReader;
+import com.graphhopper.reader.PrincetonReader;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.routing.util.HintsMap;
@@ -130,7 +130,7 @@ public class RoutingAlgorithmIT {
         final GraphHopperStorage graph = new GraphBuilder(eManager).create();
 
         String bigFile = "10000EWD.txt.gz";
-        new PrinctonReader(graph).setStream(new GZIPInputStream(PrinctonReader.class.getResourceAsStream(bigFile))).read();
+        new PrincetonReader(graph).setStream(new GZIPInputStream(PrincetonReader.class.getResourceAsStream(bigFile))).read();
         GraphHopper hopper = new GraphHopper() {
             {
                 setCHEnabled(false);
@@ -166,7 +166,7 @@ public class RoutingAlgorithmIT {
             float perRun = sw.stop().getSeconds() / ((float) (N - noJvmWarming));
             System.out.println("# " + getClass().getSimpleName() + " " + entry
                     + ":" + sw.stop().getSeconds() + ", per run:" + perRun);
-            assertTrue("speed to low!? " + perRun + " per run", perRun < 0.08);
+            assertTrue("speed too low!? " + perRun + " per run", perRun < 0.08);
         }
     }
 }

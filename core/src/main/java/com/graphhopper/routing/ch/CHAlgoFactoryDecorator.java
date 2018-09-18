@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,6 +22,7 @@ import com.graphhopper.routing.RoutingAlgorithmFactoryDecorator;
 import com.graphhopper.routing.util.HintsMap;
 import com.graphhopper.routing.util.TraversalMode;
 import com.graphhopper.routing.weighting.AbstractWeighting;
+import com.graphhopper.routing.weighting.BlockAreaWeighting;
 import com.graphhopper.routing.weighting.GenericWeighting;
 import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.*;
@@ -34,11 +35,12 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static com.graphhopper.util.Helper.*;
 import static com.graphhopper.util.Parameters.CH.DISABLE;
 
 /**
- * This class implements the CH decorator and provides several helper methods related to CH
- * preparation and its vehicle profiles.
+ * This class implements the CH decorator for the routing algorithm factory and provides several
+ * helper methods related to CH preparation and its vehicle profiles.
  *
  * @author Peter Karich
  */
@@ -78,7 +80,7 @@ public class CHAlgoFactoryDecorator implements RoutingAlgorithmFactoryDecorator 
         // default is enabled & fastest
         String chWeightingsStr = args.get(CH.PREPARE + "weightings", "");
 
-        if ("no".equals(chWeightingsStr)) {
+        if ("no".equals(chWeightingsStr) || "false".equals(chWeightingsStr)) {
             // default is fastest and we need to clear this explicitely
             weightingsAsStrings.clear();
         } else if (!chWeightingsStr.isEmpty()) {
@@ -226,7 +228,7 @@ public class CHAlgoFactoryDecorator implements RoutingAlgorithmFactoryDecorator 
 
         weightingsAsStrings.clear();
         for (String strWeighting : weightingList) {
-            strWeighting = strWeighting.toLowerCase();
+            strWeighting = toLowerCase(strWeighting);
             strWeighting = strWeighting.trim();
             addWeighting(strWeighting);
         }
@@ -243,8 +245,8 @@ public class CHAlgoFactoryDecorator implements RoutingAlgorithmFactoryDecorator 
 
     @Override
     public RoutingAlgorithmFactory getDecoratedAlgorithmFactory(RoutingAlgorithmFactory defaultAlgoFactory, HintsMap map) {
-        boolean forceFlexMode = map.getBool(DISABLE, false);
-        if (!isEnabled() || forceFlexMode)
+        boolean disableCH = map.getBool(DISABLE, false);
+        if (!isEnabled() || disablingAllowed && disableCH)
             return defaultAlgoFactory;
 
         if (preparations.isEmpty())
@@ -281,24 +283,15 @@ public class CHAlgoFactoryDecorator implements RoutingAlgorithmFactoryDecorator 
         ExecutorCompletionService completionService = new ExecutorCompletionService<>(threadPool);
         int counter = 0;
         for (final PrepareContractionHierarchies prepare : getPreparations()) {
-            LOGGER.info((++counter) + "/" + getPreparations().size() + " calling CH prepare.doWork for " + prepare.getWeighting() + " ... (" + Helper.getMemInfo() + ")");
+            LOGGER.info((++counter) + "/" + getPreparations().size() + " calling CH prepare.doWork for " + prepare.getWeighting() + " ... (" + getMemInfo() + ")");
             final String name = AbstractWeighting.weightingToFileName(prepare.getWeighting());
             completionService.submit(new Runnable() {
                 @Override
                 public void run() {
-                    String errorKey = CH.PREPARE + "error." + name;
-                    try {
-                        // toString is not taken into account so we need to cheat, see http://stackoverflow.com/q/6113746/194609 for other options
-                        Thread.currentThread().setName(name);
-                        properties.put(errorKey, "CH preparation incomplete");
-                        prepare.doWork();
-                        properties.remove(errorKey);
-                        properties.put(CH.PREPARE + "date." + name, Helper.createFormatter().format(new Date()));
-                    } catch (Exception ex) {
-                        LOGGER.error("Problem while CH preparation " + name, ex);
-                        properties.put(errorKey, ex.getMessage());
-                        throw ex;
-                    }
+                    // toString is not taken into account so we need to cheat, see http://stackoverflow.com/q/6113746/194609 for other options
+                    Thread.currentThread().setName(name);
+                    prepare.doWork();
+                    properties.put(CH.PREPARE + "date." + name, createFormatter().format(new Date()));
                 }
             }, name);
 
@@ -325,9 +318,6 @@ public class CHAlgoFactoryDecorator implements RoutingAlgorithmFactoryDecorator 
         traversalMode = getNodeBase();
 
         for (Weighting weighting : getWeightings()) {
-            if (weighting instanceof GenericWeighting) {
-                ((GenericWeighting) weighting).setGraph(ghStorage);
-            }
             PrepareContractionHierarchies tmpPrepareCH = new PrepareContractionHierarchies(
                     new GHDirectory("", DAType.RAM_INT), ghStorage, ghStorage.getGraph(CHGraph.class, weighting),
                     weighting, traversalMode);

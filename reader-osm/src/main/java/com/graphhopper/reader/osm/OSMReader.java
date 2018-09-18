@@ -1,14 +1,14 @@
 /*
  *  Licensed to GraphHopper GmbH under one or more contributor
- *  license agreements. See the NOTICE file distributed with this work for 
+ *  license agreements. See the NOTICE file distributed with this work for
  *  additional information regarding copyright ownership.
- * 
- *  GraphHopper GmbH licenses this file to you under the Apache License, 
- *  Version 2.0 (the "License"); you may not use this file except in 
+ *
+ *  GraphHopper GmbH licenses this file to you under the Apache License,
+ *  Version 2.0 (the "License"); you may not use this file except in
  *  compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *       http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,18 +17,12 @@
  */
 package com.graphhopper.reader.osm;
 
-import com.carrotsearch.hppc.IntLongMap;
-import com.carrotsearch.hppc.LongArrayList;
-import com.carrotsearch.hppc.LongIndexedContainer;
-import com.carrotsearch.hppc.LongLongMap;
-import com.carrotsearch.hppc.LongSet;
-import com.graphhopper.coll.GHIntLongHashMap;
-import com.graphhopper.coll.GHLongHashSet;
-import com.graphhopper.coll.GHLongIntBTree;
-import com.graphhopper.coll.GHLongLongHashMap;
+import com.carrotsearch.hppc.*;
+import com.graphhopper.coll.*;
 import com.graphhopper.coll.LongIntMap;
 import com.graphhopper.reader.*;
 import com.graphhopper.reader.dem.ElevationProvider;
+import com.graphhopper.reader.dem.GraphElevationSmoothing;
 import com.graphhopper.reader.osm.OSMTurnRelation.TurnCostTableEntry;
 import com.graphhopper.routing.util.DefaultEdgeFilter;
 import com.graphhopper.routing.util.EncodingManager;
@@ -51,12 +45,12 @@ import static com.graphhopper.util.Helper.nf;
  * This class parses an OSM xml or pbf file and creates a graph from it. It does so in a two phase
  * parsing processes in order to reduce memory usage compared to a single parsing processing.
  * <p>
- * 1. a) Reads ways from OSM file and stores all associated node ids in osmNodeIdToIndexMap. If a
+ * 1. a) Reads ways from OSM file and stores all associated node ids in {@link #osmNodeIdToInternalNodeMap}. If a
  * node occurs once it is a pillar node and if more it is a tower node, otherwise
- * osmNodeIdToIndexMap returns EMPTY.
+ * {@link #osmNodeIdToInternalNodeMap} returns EMPTY.
  * <p>
  * 1. b) Reads relations from OSM file. In case that the relation is a route relation, it stores
- * specific relation attributes required for routing into osmWayIdToRouteWeigthMap for all the ways
+ * specific relation attributes required for routing into {@link #osmWayIdToRouteWeightMap} for all the ways
  * of the relation.
  * <p>
  * 2.a) Reads nodes from OSM file and stores lat+lon information either into the intermediate
@@ -64,7 +58,7 @@ import static com.graphhopper.util.Helper.nf;
  * graphStorage via setLatitude/setLongitude. It can also happen that a pillar node needs to be
  * transformed into a tower node e.g. via barriers or different speed values for one way.
  * <p>
- * 2.b) Reads ways OSM file and creates edges while calculating the speed etc from the OSM tags.
+ * 2.b) Reads ways from OSM file and creates edges while calculating the speed etc from the OSM tags.
  * When creating an edge the pillar node information from the intermediate data structure will be
  * stored in the way geometry of that edge.
  * <p>
@@ -85,9 +79,10 @@ public class OSMReader implements DataReader {
     private final DistanceCalc distCalc = Helper.DIST_EARTH;
     private final DistanceCalc3D distCalc3D = Helper.DIST_3D;
     private final DouglasPeucker simplifyAlgo = new DouglasPeucker();
+    private boolean smoothElevation = false;
     private final boolean exitOnlyPillarNodeException = true;
-    private final Map<FlagEncoder, EdgeExplorer> outExplorerMap = new HashMap<FlagEncoder, EdgeExplorer>();
-    private final Map<FlagEncoder, EdgeExplorer> inExplorerMap = new HashMap<FlagEncoder, EdgeExplorer>();
+    private final Map<FlagEncoder, EdgeExplorer> outExplorerMap = new HashMap<>();
+    private final Map<FlagEncoder, EdgeExplorer> inExplorerMap = new HashMap<>();
     protected long zeroCounter = 0;
     protected PillarInfo pillarInfo;
     private long locations;
@@ -117,6 +112,7 @@ public class OSMReader implements DataReader {
     private ElevationProvider eleProvider = ElevationProvider.NOOP;
     private File osmFile;
     private Date osmDataDate;
+    private boolean createStorage = true;
 
     public OSMReader(GraphHopperStorage ghStorage) {
         this.ghStorage = ghStorage;
@@ -249,7 +245,9 @@ public class OSMReader implements DataReader {
     private void writeOsm2Graph(File osmFile) {
         int tmp = (int) Math.max(getNodeMap().getSize() / 50, 100);
         LOGGER.info("creating graph. Found nodes (pillar+tower):" + nf(getNodeMap().getSize()) + ", " + Helper.getMemInfo());
-        ghStorage.create(tmp);
+        if (createStorage)
+            ghStorage.create(tmp);
+
         long wayStart = -1;
         long relationStart = -1;
         long counter = 1;
@@ -260,7 +258,7 @@ public class OSMReader implements DataReader {
             while ((item = in.getNext()) != null) {
                 switch (item.getType()) {
                     case ReaderElement.NODE:
-                        if (nodeFilter.get(item.getId()) != -1) {
+                        if (nodeFilter.get(item.getId()) != EMPTY_NODE) {
                             processNode((ReaderNode) item);
                         }
                         break;
@@ -355,7 +353,7 @@ public class OSMReader implements DataReader {
         if (wayFlags == 0)
             return;
 
-        List<EdgeIteratorState> createdEdges = new ArrayList<EdgeIteratorState>();
+        List<EdgeIteratorState> createdEdges = new ArrayList<>();
         // look for barriers along the way
         final int size = osmNodeIds.size();
         int lastBarrier = -1;
@@ -431,7 +429,7 @@ public class OSMReader implements DataReader {
     }
 
     public Collection<TurnCostTableEntry> analyzeTurnRelation(OSMTurnRelation turnRelation) {
-        Map<Long, TurnCostTableEntry> entries = new LinkedHashMap<Long, OSMTurnRelation.TurnCostTableEntry>();
+        Map<Long, TurnCostTableEntry> entries = new LinkedHashMap<>();
 
         for (FlagEncoder encoder : encodingManager.fetchEdgeEncoders()) {
             for (TurnCostTableEntry entry : analyzeTurnRelation(encoder, turnRelation)) {
@@ -456,10 +454,10 @@ public class OSMReader implements DataReader {
         EdgeExplorer edgeInExplorer = inExplorerMap.get(encoder);
 
         if (edgeOutExplorer == null || edgeInExplorer == null) {
-            edgeOutExplorer = graph.createEdgeExplorer(new DefaultEdgeFilter(encoder, false, true));
+            edgeOutExplorer = graph.createEdgeExplorer(DefaultEdgeFilter.outEdges(encoder));
             outExplorerMap.put(encoder, edgeOutExplorer);
 
-            edgeInExplorer = graph.createEdgeExplorer(new DefaultEdgeFilter(encoder, true, false));
+            edgeInExplorer = graph.createEdgeExplorer(DefaultEdgeFilter.inEdges(encoder));
             inExplorerMap.put(encoder, edgeInExplorer);
         }
         return turnRelation.getRestrictionAsEntries(encoder, edgeOutExplorer, edgeInExplorer, this);
@@ -602,7 +600,7 @@ public class OSMReader implements DataReader {
      */
     Collection<EdgeIteratorState> addOSMWay(final LongIndexedContainer osmNodeIds, final long flags, final long wayOsmId) {
         PointList pointList = new PointList(osmNodeIds.size(), nodeAccess.is3D());
-        List<EdgeIteratorState> newEdges = new ArrayList<EdgeIteratorState>(5);
+        List<EdgeIteratorState> newEdges = new ArrayList<>(5);
         int firstNode = -1;
         int lastIndex = osmNodeIds.size() - 1;
         int lastInBoundsPillarNode = -1;
@@ -677,6 +675,10 @@ public class OSMReader implements DataReader {
             throw new AssertionError("to or from index is invalid for this edge " + fromIndex + "->" + toIndex + ", points:" + pointList);
         if (pointList.getDimension() != nodeAccess.getDimension())
             throw new AssertionError("Dimension does not match for pointList vs. nodeAccess " + pointList.getDimension() + " <-> " + nodeAccess.getDimension());
+
+        // Smooth the elevation before calculating the distance because the distance will be incorrect if calculated afterwards
+        if (this.smoothElevation)
+            pointList = GraphElevationSmoothing.smoothElevation(pointList);
 
         double towerNodeDistance = 0;
         double prevLat = pointList.getLatitude(0);
@@ -880,6 +882,12 @@ public class OSMReader implements DataReader {
     }
 
     @Override
+    public DataReader setSmoothElevation(boolean smoothElevation) {
+        this.smoothElevation = smoothElevation;
+        return this;
+    }
+
+    @Override
     public OSMReader setWorkerThreads(int numOfWorkers) {
         this.workerThreads = numOfWorkers;
         return this;
@@ -914,6 +922,14 @@ public class OSMReader implements DataReader {
     @Override
     public Date getDataDate() {
         return osmDataDate;
+    }
+
+    /**
+     * Per default the storage used in this OSMReader is uninitialized and created i.e. createStorage is true. Specify
+     * false if you call the create method outside of OSMReader.
+     */
+    public void setCreateStorage(boolean createStorage) {
+        this.createStorage = createStorage;
     }
 
     @Override
